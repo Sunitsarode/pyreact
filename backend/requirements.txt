@@ -1,0 +1,9 @@
+flask
+flask-socketio
+flask-cors
+python-socketio
+yfinance
+pandas
+pandas-ta
+numpy
+requests

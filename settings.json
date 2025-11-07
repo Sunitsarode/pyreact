@@ -1,0 +1,49 @@
+{
+  "symbols": ["BTC-USD"]  ,
+  "intervals": ["1d", "1h", "15m", "5m", "1m"],
+  "updateIntervalMinutes": 5,
+  "candlesPerInterval": {
+    "1m": 100,
+    "5m": 100,
+    "15m": 100,
+    "1h": 100,
+    "1d": 100
+  },
+  "maxCandlesStored": {
+    "1m": 100,
+    "5m": 100,
+    "15m": 100,
+    "1h": 100,
+    "1d": 200
+  },
+  "timeframeWeights": {
+    "1d": 0.35,
+    "1h": 0.25,
+    "15m": 0.20,
+    "5m": 0.15,
+    "1m": 0.05
+  },
+  "api_server": {
+    "host": "0.0.0.0",
+    "port": 5001
+  },
+  "frontend_server": {
+    "port": 3000
+  },
+  "notifications": {
+    "enabled": false,
+    "method": "telegram",
+    "telegram": {
+      "token": "7250092480:AAHPFLK_OmYFbIZbMGbp5RCHTiI1-VIlFCQ",
+      "chat_id": "926220059"
+    },
+    "ntfy": {
+      "endpoint": "https://ntfy.sh/sumit_push_notes"
+    }
+  },
+  "breakout_rules": {
+    "total_score_threshold": 30,
+    "rsi_overbought": 70,
+    "rsi_oversold": 30
+  }
+}
