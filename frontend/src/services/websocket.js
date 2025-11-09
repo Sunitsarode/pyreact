@@ -1,6 +1,16 @@
 import { io } from 'socket.io-client';
 
-const BACKEND_URL = 'http://localhost:5001';
+// Automatically detect current host and use port 5001
+const getBackendURL = () => {
+  if (typeof window !== 'undefined') {
+    const protocol = window.location.protocol; // http: or https:
+    const hostname = window.location.hostname; // 64.227.183.105 or localhost
+    return `${protocol}//${hostname}:5001`;
+  }
+  return 'http://localhost:5001'; // Fallback
+};
+
+const BACKEND_URL = getBackendURL();
 
 class WebSocketService {
   constructor() {
@@ -16,12 +26,15 @@ class WebSocketService {
   connect() {
     if (this.socket?.connected) return;
 
+    console.log('🔌 Connecting to WebSocket:', BACKEND_URL);
+
     this.socket = io(BACKEND_URL, {
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      reconnectionAttempts: 5
+      reconnectionAttempts: 5,
+      withCredentials: false
     });
 
     this.socket.on('connect', () => {
@@ -29,9 +42,13 @@ class WebSocketService {
       this.listeners.connect.forEach(cb => cb());
     });
 
-    this.socket.on('disconnect', () => {
-      console.log('❌ WebSocket Disconnected');
+    this.socket.on('disconnect', (reason) => {
+      console.log('❌ WebSocket Disconnected:', reason);
       this.listeners.disconnect.forEach(cb => cb());
+    });
+
+    this.socket.on('connect_error', (error) => {
+      console.error('❌ Connection Error:', error.message);
     });
 
     this.socket.on('score_update', (data) => {

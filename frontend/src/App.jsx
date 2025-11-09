@@ -8,7 +8,17 @@ import CandlestickChart from './components/CandlestickChart';
 import IndicatorsChart from './components/IndicatorsChart';
 import AlertRules from './components/AlertRules';
 
-const API_URL = 'http://localhost:5001/api';
+// At the top of each file
+const getApiURL = () => {
+  if (typeof window !== 'undefined') {
+    const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    return `${protocol}//${hostname}:5001/api`;
+  }
+  return 'http://localhost:5001/api';
+};
+
+const API_URL = getApiURL();
 
 function App() {
   const [symbols, setSymbols] = useState([]);

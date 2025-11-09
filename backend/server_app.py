@@ -19,7 +19,8 @@ from indicators import calculate_all_scores
 from notifications import send_notification
 
 app = Flask(__name__)
-CORS(app)
+#CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Load settings
