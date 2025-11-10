@@ -12,6 +12,7 @@ const getApiURL = () => {
 };
 
 const API_URL = getApiURL();
+console.log('🔍 IndicatorsChart.jsx API_URL:', API_URL);  // ← Add this line
 
 export default function IndicatorsChart({ scoreHistory, threshold }) {
   const [selectedInterval, setSelectedInterval] = useState('1h');

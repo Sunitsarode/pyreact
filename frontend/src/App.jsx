@@ -19,6 +19,7 @@ const getApiURL = () => {
 };
 
 const API_URL = getApiURL();
+console.log('🔍 App.jsx API_URL:', API_URL);  // ← Add this line
 
 function App() {
   const [symbols, setSymbols] = useState([]);

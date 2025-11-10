@@ -13,6 +13,7 @@ const getApiURL = () => {
 };
 
 const API_URL = getApiURL();
+console.log('🔍 CandlestickChart.jsx API_URL:', API_URL);  // ← Add this line
 
 export default function CandlestickChart({ symbol, intervals }) {
   const [selectedInterval, setSelectedInterval] = useState('1h');
