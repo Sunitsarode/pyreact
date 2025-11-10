@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import ReactApexChart from 'react-apexcharts';
 import axios from 'axios';
+import { API_URL } from '../utils/api';
 
 // At the top of each file
-const getApiURL = () => {
+/*const getApiURL = () => {
   if (typeof window !== 'undefined') {
     const protocol = window.location.protocol;
     const hostname = window.location.hostname;
@@ -12,7 +13,7 @@ const getApiURL = () => {
   return 'http://localhost:5001/api';
 };
 
-const API_URL = getApiURL();
+const API_URL = getApiURL();*/
 console.log('🔍 CandlestickChart.jsx API_URL:', API_URL);  // ← Add this line
 
 export default function CandlestickChart({ symbol, intervals }) {

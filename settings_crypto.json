@@ -1,0 +1,46 @@
+{
+  "symbols": ["BTC-USD", "ETH-USD", "DOGE-USD", "SOL-USD", "ADA-USD"],
+  "intervals": ["1d", "1h", "15m", "5m", "1m"],
+  "updateIntervalMinutes": 3,
+  "candlesPerInterval": {
+    "1m": 150,
+    "5m": 150,
+    "15m": 150,
+    "1h": 150,
+    "1d": 150
+  },
+  "maxCandlesStored": {
+    "1m": 150,
+    "5m": 150,
+    "15m": 150,
+    "1h": 150,
+    "1d": 250
+  },
+  "timeframeWeights": {
+    "1d": 0.30,
+    "1h": 0.30,
+    "15m": 0.25,
+    "5m": 0.10,
+    "1m": 0.05
+  },
+  "api_server": {
+    "host": "0.0.0.0",
+    "port": 5001
+  },
+  "frontend_server": {
+    "port": 3000
+  },
+  "notifications": {
+    "enabled": true,
+    "method": "telegram",
+    "telegram": {
+      "token": "YOUR_BOT_TOKEN",
+      "chat_id": "YOUR_CHAT_ID"
+    }
+  },
+  "breakout_rules": {
+    "total_score_threshold": 35,
+    "rsi_overbought": 75,
+    "rsi_oversold": 25
+  }
+}

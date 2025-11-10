@@ -1,5 +1,5 @@
 # ============================================
-# backend/app.py
+# backend/server_app.py
 # Flask + WebSocket Server with Database Storage
 # ============================================
 from flask import Flask, jsonify, request
@@ -8,6 +8,7 @@ from flask_cors import CORS
 import json
 import threading
 import time
+import argparse
 from datetime import datetime
 
 from db_manager import (
@@ -18,18 +19,73 @@ from data_fetcher import fetch_market_data, fetch_market_data_with_timestamps
 from indicators import calculate_all_scores
 from notifications import send_notification
 
-app = Flask(__name__)
-#CORS(app)
-CORS(app, resources={r"/*": {"origins": "*"}})
-socketio = SocketIO(app, cors_allowed_origins="*")
+# ============================================
+# CLI Argument Parsing
+# ============================================
+parser = argparse.ArgumentParser(description='Live Analyser Backend Server')
+parser.add_argument('--config', type=str, default='../settings.json', 
+                    help='Path to settings JSON file (default: settings.json)')
+args = parser.parse_args()
 
-# Load settings
-with open('../settings.json', 'r') as f:
-    settings = json.load(f)
+config_file = args.config
+
+# ============================================
+# Load Settings
+# ============================================
+print(f"\n{'='*60}")
+print(f"📁 Loading configuration from: {config_file}")
+print(f"{'='*60}")
+
+try:
+    with open(config_file, 'r') as f:
+        settings = json.load(f)
+    print(f"✅ Configuration loaded successfully!")
+    print(f"📊 Symbols: {', '.join(settings['symbols'])}")
+except FileNotFoundError:
+    print(f"❌ Error: Config file '{config_file}' not found!")
+    print(f"💡 Usage: python server_app.py --config your_settings.json")
+    exit(1)
+except json.JSONDecodeError as e:
+    print(f"❌ Error: Invalid JSON in config file: {e}")
+    exit(1)
+
+# ============================================
+# Flask App Setup
+# ============================================
+app = Flask(__name__)
+
+#CORS(app, resources={r"/*": {"origins": "*"}})
+#socketio = SocketIO(app, cors_allowed_origins="*")
+
+CORS(app, resources={
+    r"/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "expose_headers": ["Content-Type"],
+        "supports_credentials": False,
+        "max_age": 3600
+    }
+})
+
+# Enhanced SocketIO with better CORS
+socketio = SocketIO(
+    app, 
+    cors_allowed_origins="*",
+    async_mode='threading',
+    logger=True,
+    engineio_logger=True,
+    ping_timeout=60,
+    ping_interval=25
+)
 
 # Initialize databases for all symbols
+print(f"\n{'='*60}")
+print(f"🗄️  Initializing databases...")
+print(f"{'='*60}")
 for symbol in settings['symbols']:
     init_db(symbol, settings['intervals'])
+    print(f"  ✅ {symbol}: db/{symbol}.sqlite")
 
 # Alert tracking (avoid duplicate alerts)
 last_alert_time = {}
@@ -242,6 +298,11 @@ def get_scores_history_api(symbol):
     scores = get_latest_scores(symbol, limit)
     return jsonify(scores)
 
+@app.route('/api/health')
+def health_check():
+    """Health check endpoint"""
+    return jsonify({"status": "ok", "timestamp": datetime.now().isoformat()})
+
 # ============================================
 # WebSocket Events
 # ============================================
@@ -279,6 +340,7 @@ if __name__ == '__main__':
     print(f"\n{'='*60}")
     print(f"🚀 Live Analyser Backend Started")
     print(f"{'='*60}")
+    print(f"📁 Config File: {config_file}")
     print(f"🔡 Server: http://{host}:{port}")
     print(f"📊 Symbols: {', '.join(settings['symbols'])}")
     print(f"⏱️  Update Interval: {settings['updateIntervalMinutes']} minutes")

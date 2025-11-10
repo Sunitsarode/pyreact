@@ -1,27 +1,24 @@
 {
-  "symbols": ["BTC-USD", "^NSEI"] ,
-  "intervals": ["1d", "1h", "15m", "5m", "1m"],
+  "symbols": ["^NSEI", "^BSESN", "RELIANCE.NS", "TCS.NS", "INFY.NS"],
+  "intervals": ["1d", "1h", "15m", "5m"],
   "updateIntervalMinutes": 5,
   "candlesPerInterval": {
-    "1m": 100,
     "5m": 100,
     "15m": 100,
     "1h": 100,
     "1d": 100
   },
   "maxCandlesStored": {
-    "1m": 100,
     "5m": 100,
     "15m": 100,
     "1h": 100,
     "1d": 200
   },
   "timeframeWeights": {
-    "1d": 0.35,
-    "1h": 0.25,
+    "1d": 0.40,
+    "1h": 0.30,
     "15m": 0.20,
-    "5m": 0.15,
-    "1m": 0.05
+    "5m": 0.10
   },
   "api_server": {
     "host": "0.0.0.0",
@@ -32,17 +29,13 @@
   },
   "notifications": {
     "enabled": false,
-    "method": "telegram",
-    "telegram": {
-      "token": "7250092480:AAHPFLK_OmYFbIZbMGbp5RCHTiI1-VIlFCQ",
-      "chat_id": "926220059"
-    },
+    "method": "ntfy",
     "ntfy": {
-      "endpoint": "https://ntfy.sh/sumit_push_notes"
+      "endpoint": "https://ntfy.sh/indian_stocks_alerts"
     }
   },
   "breakout_rules": {
-    "total_score_threshold": 30,
+    "total_score_threshold": 25,
     "rsi_overbought": 70,
     "rsi_oversold": 30
   }

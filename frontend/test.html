@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Connection Test</title>
+</head>
+<body>
+    <h1>Backend Connection Test</h1>
+    <div id="results"></div>
+
+    <script>
+        const results = document.getElementById('results');
+        
+        async function testAPI() {
+            const apiURL = `${window.location.protocol}//${window.location.hostname}:5001/api`;
+            results.innerHTML += `<p>Testing API at: ${apiURL}</p>`;
+            
+            try {
+                const response = await fetch(`${apiURL}/health`);
+                const data = await response.json();
+                results.innerHTML += `<p style="color: green;">✅ API Connected: ${JSON.stringify(data)}</p>`;
+            } catch (error) {
+                results.innerHTML += `<p style="color: red;">❌ API Error: ${error.message}</p>`;
+            }
+        }
+        
+        testAPI();
+    </script>
+</body>
+</html>

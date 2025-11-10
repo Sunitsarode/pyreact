@@ -4,7 +4,7 @@ myenv2/
 __pycache__/
 *.py[codz]
 *$py.class
-
+package-lock.json
 # C extensions
 *.so
 

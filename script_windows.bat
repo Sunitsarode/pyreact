@@ -5,7 +5,7 @@ echo ========================================
 echo.
 
 echo [1/2] Starting Backend Server...
-start "Backend Server" cmd /k "cd backend && python app.py"
+start "Backend Server" cmd /k "cd backend && python server_app.py"
 timeout /t 3
 
 echo [2/2] Starting Frontend Server...
