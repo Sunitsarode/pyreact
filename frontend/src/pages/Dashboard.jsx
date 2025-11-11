@@ -111,16 +111,6 @@ export default function Dashboard() {
     return { icon: '↔️', text: 'NEUTRAL' };
   };
 
-  const getCurrentPrice = (data) => {
-    if (!data || !data.intervals) return 0;
-    for (const interval of ['1d', '1h', '15m', '5m', '1m']) {
-      if (data.intervals[interval]?.current_price) {
-        return data.intervals[interval].current_price;
-      }
-    }
-    return 0;
-  };
-
   if (error) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 p-6 flex items-center justify-center">
@@ -181,7 +171,7 @@ export default function Dashboard() {
             {symbols.map(symbol => {
               const data = symbolData[symbol] || {};
               const score = data.weighted_total_score || 0;
-              const price = getCurrentPrice(data);
+              const price = data.current_price || 0;
               const status = getScoreStatus(score);
               
               return (

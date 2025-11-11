@@ -174,7 +174,7 @@ def background_worker():
                 print(f"{'='*50}")
                 
                 interval_scores = {}
-                current_price = None
+                current_price = 0  # Initialize to 0
                 current_timestamp = int(time.time())
                 
                 # Calculate scores for each timeframe
@@ -197,10 +197,13 @@ def background_worker():
                             scores = calculate_all_scores(data, interval)
                             interval_scores[interval] = scores
                             
-                            if current_price is None:
-                                current_price = data['close'][-1]
-                            
                             print(f"  ✅ {interval}: Score = {scores['total_score']:.1f} | S/R = {scores['support']:.2f} / {scores['resistance']:.2f}")
+
+                # Determine the most accurate current price by checking shortest intervals first
+                for interval in reversed(settings['intervals']):
+                    if interval in interval_scores and interval_scores[interval].get('current_price', 0) != 0:
+                        current_price = interval_scores[interval]['current_price']
+                        break  # Found a valid price, no need to check longer intervals
                 
                 # Calculate weighted total score across all timeframes
                 if interval_scores:

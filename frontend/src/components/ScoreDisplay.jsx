@@ -1,4 +1,6 @@
-export default function ScoreDisplay({ score, settings }) {
+import { formatPrice } from '../utils/formatters';
+
+export default function ScoreDisplay({ score, settings, symbol }) {
   const threshold = settings.breakout_rules?.total_score_threshold || 30;
   const totalScore = score.weighted_total_score || 0;
   
@@ -24,18 +26,8 @@ export default function ScoreDisplay({ score, settings }) {
     return 'bg-blue-500';
   };
 
-  // Get current price from any available interval
-  const getCurrentPrice = () => {
-    const intervals = score.intervals || {};
-    for (const interval of ['1d', '1h', '15m', '5m', '1m']) {
-      if (intervals[interval]?.current_price) {
-        return intervals[interval].current_price;
-      }
-    }
-    return 0;
-  };
-
-  const currentPrice = getCurrentPrice();
+  const currentPrice = score.current_price || 0;
+  const formattedPrice = formatPrice(currentPrice, symbol);
 
   return (
     <div className="bg-white rounded-2xl shadow-xl p-8">
@@ -61,7 +53,7 @@ export default function ScoreDisplay({ score, settings }) {
           <span>-100 (Bearish)</span>
           <div className="text-center">
             <p className="text-lg font-bold text-gray-900">
-              ${currentPrice.toFixed(2)}
+              {formattedPrice}
             </p>
             <p className="text-xs">Current Price</p>
           </div>

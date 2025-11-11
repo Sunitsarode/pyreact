@@ -198,6 +198,7 @@ export default function SymbolPage() {
         <ScoreDisplay 
           score={currentScore} 
           settings={settings}
+          symbol={symbol}
         />
 
         {/* Interval Breakdown */}
