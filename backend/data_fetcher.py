@@ -85,3 +85,29 @@ def fetch_market_data_with_timestamps(symbol, interval, candles_needed):
     except Exception as e:
         print(f"  ❌ Error fetching {symbol} {interval}: {e}")
         return None
+
+def fetch_current_price(symbol):
+    """
+    Fetch the current market price for a symbol.
+    Tries to get 'regularMarketPrice' or 'currentPrice' from ticker info.
+    Falls back to the last close price from 1d history.
+    """
+    try:
+        ticker = yf.Ticker(symbol)
+        
+        # First, try to get the current price from ticker.info
+        info = ticker.info
+        if 'regularMarketPrice' in info and info['regularMarketPrice'] is not None:
+            return info['regularMarketPrice']
+        if 'currentPrice' in info and info['currentPrice'] is not None:
+            return info['currentPrice']
+
+        # If not available, fall back to the last closing price
+        hist = ticker.history(period="1d")
+        if not hist.empty:
+            return hist['Close'].iloc[-1]
+            
+        return 0
+    except Exception as e:
+        print(f"  ❌ Error fetching current price for {symbol}: {e}")
+        return 0

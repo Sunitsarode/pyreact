@@ -17,12 +17,14 @@ console.log('🔍 IndicatorsChart.jsx API_URL:', API_URL);  // ← Add this line
 export default function IndicatorsChart({ scoreHistory, threshold }) {
   const [selectedInterval, setSelectedInterval] = useState('1h');
   const [visibleIndicators, setVisibleIndicators] = useState({
-    rsi: true,
-    macd: true,
-    adx: true,
-    bb: true,
-    sma: true,
-    supertrend: true
+    avgWeightedScore: true,
+    avgScore: true,
+    rsi: false,
+    macd: false,
+    adx: false,
+    bb: false,
+    sma: false,
+    supertrend: false
   });
 
   const intervals = ['1d', '1h', '15m', '5m', '1m'];
@@ -51,7 +53,20 @@ export default function IndicatorsChart({ scoreHistory, threshold }) {
     });
   };
 
+  const getAvgWeightedScoreData = () => {
+    return scoreHistory.map(s => s.weighted_total_score || 0);
+  };
+
+  const getAvgScoreData = () => {
+    return scoreHistory.map(s => {
+      const intervalData = s.intervals?.[selectedInterval];
+      return intervalData?.total_score || 0;
+    });
+  };
+
   const indicatorConfig = {
+    avgWeightedScore: { name: 'Avg Weighted Score', color: '#FF0000', data: getAvgWeightedScoreData() },
+    avgScore: { name: 'Avg Score', color: '#0000FF', data: getAvgScoreData() },
     rsi: { name: 'RSI', color: '#9333EA', data: getIndicatorData('rsi') },
     macd: { name: 'MACD', color: '#3B82F6', data: getIndicatorData('macd') },
     adx: { name: 'ADX', color: '#F97316', data: getIndicatorData('adx') },

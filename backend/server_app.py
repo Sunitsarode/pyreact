@@ -15,7 +15,7 @@ from db_manager import (
     init_db, save_candles, save_indicator_scores,
     get_candles, get_latest_scores, get_latest_score
 )
-from data_fetcher import fetch_market_data, fetch_market_data_with_timestamps
+from data_fetcher import fetch_market_data, fetch_market_data_with_timestamps, fetch_current_price
 from indicators import calculate_all_scores
 from notifications import send_notification
 
@@ -174,7 +174,8 @@ def background_worker():
                 print(f"{'='*50}")
                 
                 interval_scores = {}
-                current_price = 0  # Initialize to 0
+                current_price = fetch_current_price(symbol) # Fetch reliable current price
+                print(f"  💰 Fetched current price for {symbol}: {current_price}") # DEBUG LOG
                 current_timestamp = int(time.time())
                 
                 # Calculate scores for each timeframe
@@ -199,13 +200,7 @@ def background_worker():
                             
                             print(f"  ✅ {interval}: Score = {scores['total_score']:.1f} | S/R = {scores['support']:.2f} / {scores['resistance']:.2f}")
 
-                # Determine the most accurate current price by checking shortest intervals first
-                for interval in reversed(settings['intervals']):
-                    if interval in interval_scores and interval_scores[interval].get('current_price', 0) != 0:
-                        current_price = interval_scores[interval]['current_price']
-                        break  # Found a valid price, no need to check longer intervals
-                
-                # Calculate weighted total score across all timeframes
+                # Weighted total score calculation is now independent of price fetching
                 if interval_scores:
                     weights = settings['timeframeWeights']
                     weighted_total = 0

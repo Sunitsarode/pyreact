@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import ReactApexChart from 'react-apexcharts';
 import axios from 'axios';
 import { API_URL } from '../utils/api';
@@ -21,6 +21,8 @@ export default function CandlestickChart({ symbol, intervals }) {
   const [candles, setCandles] = useState([]);
   const [scoreHistory, setScoreHistory] = useState([]);
   const [loading, setLoading] = useState(true);
+  const chartRef = useRef(null);
+  const [zoomRange, setZoomRange] = useState(null);
 
   useEffect(() => {
     if (intervals.length > 0 && !intervals.includes(selectedInterval)) {
@@ -29,10 +31,12 @@ export default function CandlestickChart({ symbol, intervals }) {
   }, [intervals]);
 
   useEffect(() => {
+    // Reset zoom when symbol or interval changes
+    setZoomRange(null);
     loadData();
     
-    // Auto-refresh every 30 seconds
-    const interval = setInterval(loadData, 30000);
+    // Auto-refresh every 5 minutes
+    const interval = setInterval(loadData, 300000);
     return () => clearInterval(interval);
   }, [symbol, selectedInterval]);
 
@@ -140,6 +144,14 @@ export default function CandlestickChart({ symbol, intervals }) {
         enabled: true,
         type: 'xy',  // Enable both X and Y axis zoom
         autoScaleYaxis: true  // Auto-scale Y axis when zooming
+      },
+      animations: {
+        enabled: false
+      },
+      events: {
+        zoomed: (chartContext, { xaxis }) => {
+          setZoomRange({ min: xaxis.min, max: xaxis.max });
+        }
       }
     },
     title: {
@@ -154,6 +166,7 @@ export default function CandlestickChart({ symbol, intervals }) {
     xaxis: {
       type: 'datetime',
       timezone: 'Asia/Kolkata',  // IST timezone
+      ...zoomRange, // Apply the zoom range here
       labels: {
         datetimeUTC: false,
         datetimeFormatter: {
