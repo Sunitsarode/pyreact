@@ -161,7 +161,13 @@ export default function SymbolPage() {
               </div>
             </div>
             
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => navigate(`/all-indicators-score/${symbol}`)}
+                className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-semibold transition flex items-center gap-2"
+              >
+                All Indicator Status
+              </button>
               <div className={`w-3 h-3 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'} animate-pulse`}></div>
               <span className="text-gray-600 font-semibold">
                 {connected ? 'Connected' : 'Disconnected'}

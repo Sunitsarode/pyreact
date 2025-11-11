@@ -222,3 +222,36 @@ def get_latest_score(symbol):
     """Get the most recent score"""
     scores = get_latest_scores(symbol, limit=1)
     return scores[0] if scores else None
+
+def get_indicator_scores_history(symbol, interval, limit=100):
+    """Get historical indicator scores for a specific interval."""
+    conn = get_connection(symbol)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT timestamp, intervals_json
+        FROM indicators_score
+        ORDER BY timestamp DESC
+        LIMIT ?
+    ''', (limit,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    scores = []
+    for row in reversed(rows):
+        intervals = json.loads(row['intervals_json'])
+        if interval in intervals:
+            interval_scores = intervals[interval]
+            score_data = {
+                'timestamp': row['timestamp'],
+                'rsi_score': interval_scores.get('rsi_score', 0),
+                'macd_score': interval_scores.get('macd_score', 0),
+                'bb_score': interval_scores.get('bb_score', 0),
+                'adx_score': interval_scores.get('adx_score', 0),
+                'supertrend_score': interval_scores.get('supertrend_score', 0),
+                'sma_score': interval_scores.get('sma_score', 0),
+            }
+            scores.append(score_data)
+            
+    return scores

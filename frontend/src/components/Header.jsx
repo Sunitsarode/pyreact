@@ -1,10 +1,17 @@
+import { Link } from 'react-router-dom';
+
 export default function Header({ symbols, selectedSymbol, onSymbolChange, connected, settings }) {
   return (
     <div className="bg-white rounded-2xl shadow-xl p-6">
       <div className="flex justify-between items-center flex-wrap gap-4">
-        <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
-          📊 Live Analyser
-        </h1>
+        <div className="flex items-center gap-4">
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+            <Link to="/">📊 Live Analyser</Link>
+          </h1>
+          <Link to="/indicators-dashboard" className="text-lg font-semibold text-gray-700 hover:text-purple-600">
+            Indicators Dashboard
+          </Link>
+        </div>
         
         <div className="flex items-center gap-4 flex-wrap">
           {/* Symbol Selector */}
