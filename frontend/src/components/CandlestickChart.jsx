@@ -3,19 +3,6 @@ import ReactApexChart from 'react-apexcharts';
 import axios from 'axios';
 import { API_URL } from '../utils/api';
 
-// At the top of each file
-/*const getApiURL = () => {
-  if (typeof window !== 'undefined') {
-    const protocol = window.location.protocol;
-    const hostname = window.location.hostname;
-    return `${protocol}//${hostname}:5001/api`;
-  }
-  return 'http://localhost:5001/api';
-};
-
-const API_URL = getApiURL();*/
-console.log('🔍 CandlestickChart.jsx API_URL:', API_URL);  // ← Add this line
-
 export default function CandlestickChart({ symbol, intervals }) {
   const [selectedInterval, setSelectedInterval] = useState('1h');
   const [candles, setCandles] = useState([]);
@@ -23,6 +10,17 @@ export default function CandlestickChart({ symbol, intervals }) {
   const [loading, setLoading] = useState(true);
   const chartRef = useRef(null);
   const [zoomRange, setZoomRange] = useState(null);
+  
+  // Toggle state for indicator visibility
+  const [visibleIndicators, setVisibleIndicators] = useState({
+    weighted: true,
+    rsi: false,
+    macd: false,
+    adx: false,
+    bb: false,
+    sma: false,
+    supertrend: false
+  });
 
   useEffect(() => {
     if (intervals.length > 0 && !intervals.includes(selectedInterval)) {
@@ -31,11 +29,9 @@ export default function CandlestickChart({ symbol, intervals }) {
   }, [intervals]);
 
   useEffect(() => {
-    // Reset zoom when symbol or interval changes
     setZoomRange(null);
     loadData();
     
-    // Auto-refresh every 5 minutes
     const interval = setInterval(loadData, 300000);
     return () => clearInterval(interval);
   }, [symbol, selectedInterval]);
@@ -44,7 +40,6 @@ export default function CandlestickChart({ symbol, intervals }) {
     try {
       setLoading(true);
       
-      // Load candles
       const candlesResponse = await axios.get(`${API_URL}/candles/${symbol}/${selectedInterval}?limit=100`);
       const candleData = candlesResponse.data.map(c => ({
         x: new Date(c.timestamp * 1000).getTime(),
@@ -52,7 +47,6 @@ export default function CandlestickChart({ symbol, intervals }) {
       }));
       setCandles(candleData);
 
-      // Load score history for weighted score and S/R lines
       const scoresResponse = await axios.get(`${API_URL}/scores/${symbol}/history?limit=100`);
       setScoreHistory(scoresResponse.data);
       
@@ -63,13 +57,68 @@ export default function CandlestickChart({ symbol, intervals }) {
     }
   };
 
-  // Prepare weighted score data for lower panel
-  const weightedScoreData = scoreHistory.map(s => ({
-    x: new Date(s.timestamp * 1000).getTime(),
-    y: s.weighted_total_score || 0
-  }));
+  const toggleIndicator = (indicator) => {
+    setVisibleIndicators(prev => ({
+      ...prev,
+      [indicator]: !prev[indicator]
+    }));
+  };
 
-  // Prepare S/R lines for each interval (as step lines that change over time)
+  // Prepare all indicator score series
+  const getIndicatorSeries = () => {
+    const timestamps = scoreHistory.map(s => new Date(s.timestamp * 1000).getTime());
+    
+    const indicatorConfig = {
+      weighted: {
+        name: 'Weighted Score',
+        color: '#FF0000',
+        data: scoreHistory.map(s => s.weighted_total_score || 0)
+      },
+      rsi: {
+        name: 'RSI Score',
+        color: '#9333EA',
+        data: scoreHistory.map(s => s.intervals?.[selectedInterval]?.rsi_score || 0)
+      },
+      macd: {
+        name: 'MACD Score',
+        color: '#3B82F6',
+        data: scoreHistory.map(s => s.intervals?.[selectedInterval]?.macd_score || 0)
+      },
+      adx: {
+        name: 'ADX Score',
+        color: '#F97316',
+        data: scoreHistory.map(s => s.intervals?.[selectedInterval]?.adx_score || 0)
+      },
+      bb: {
+        name: 'BB Score',
+        color: '#10B981',
+        data: scoreHistory.map(s => s.intervals?.[selectedInterval]?.bb_score || 0)
+      },
+      sma: {
+        name: 'SMA Score',
+        color: '#06B6D4',
+        data: scoreHistory.map(s => s.intervals?.[selectedInterval]?.sma_score || 0)
+      },
+      supertrend: {
+        name: 'Supertrend Score',
+        color: '#EF4444',
+        data: scoreHistory.map(s => s.intervals?.[selectedInterval]?.supertrend_score || 0)
+      }
+    };
+
+    return Object.entries(indicatorConfig)
+      .filter(([key]) => visibleIndicators[key])
+      .map(([key, config]) => ({
+        name: config.name,
+        data: config.data.map((val, idx) => ({
+          x: timestamps[idx],
+          y: val
+        })),
+        color: config.color
+      }));
+  };
+
+  // S/R lines
   const getSupportResistanceLines = () => {
     const intervalColors = {
       '1d': '#8B5CF6',
@@ -82,7 +131,6 @@ export default function CandlestickChart({ symbol, intervals }) {
     const srLines = [];
 
     intervals.forEach(interval => {
-      // Support line
       const supportData = scoreHistory.map(s => ({
         x: new Date(s.timestamp * 1000).getTime(),
         y: s.intervals?.[interval]?.support || null
@@ -99,7 +147,6 @@ export default function CandlestickChart({ symbol, intervals }) {
         });
       }
 
-      // Resistance line
       const resistanceData = scoreHistory.map(s => ({
         x: new Date(s.timestamp * 1000).getTime(),
         y: s.intervals?.[interval]?.resistance || null
@@ -121,37 +168,26 @@ export default function CandlestickChart({ symbol, intervals }) {
   };
 
   const srLines = getSupportResistanceLines();
+  const indicatorSeries = getIndicatorSeries();
 
+  // Main candlestick chart options
   const chartOptions = {
     chart: {
       type: 'candlestick',
       height: 500,
       id: 'candles',
+      group: 'synced-charts',
       toolbar: {
         show: true,
-        autoSelected: 'pan',
-        tools: {
-          download: true,
-          selection: true,
-          zoom: true,
-          zoomin: true,
-          zoomout: true,
-          pan: true,
-          reset: true
-        }
+        autoSelected: 'pan'
       },
       zoom: {
         enabled: true,
-        type: 'xy',  // Enable both X and Y axis zoom
-        autoScaleYaxis: true  // Auto-scale Y axis when zooming
+        type: 'xy',
+        autoScaleYaxis: true
       },
       animations: {
         enabled: false
-      },
-      events: {
-        zoomed: (chartContext, { xaxis }) => {
-          setZoomRange({ min: xaxis.min, max: xaxis.max });
-        }
       }
     },
     title: {
@@ -162,11 +198,9 @@ export default function CandlestickChart({ symbol, intervals }) {
         fontWeight: 'bold'
       }
     },
-   
     xaxis: {
       type: 'datetime',
-      timezone: 'Asia/Kolkata',  // IST timezone
-      ...zoomRange, // Apply the zoom range here
+      timezone: 'Asia/Kolkata',
       labels: {
         datetimeUTC: false,
         datetimeFormatter: {
@@ -175,38 +209,13 @@ export default function CandlestickChart({ symbol, intervals }) {
           day: 'dd MMM',
           hour: 'HH:mm'
         },
-         rotate: -45,
-    style: {
-      fontSize: '11px'
-    },
-    hideOverlappingLabels: true  
-        
-      },
-     
-    },
-/*xaxis: {
-  type: 'datetime',
-  labels: {
-    formatter: function(value, timestamp) {
-      const date = new Date(value);
-      const hours = date.getHours();
-      const minutes = date.getMinutes();
-      const day = date.getDate();
-      const month = date.toLocaleString('en-US', { month: 'short' });
-      
-      if (['1m', '5m', '15m', '1h'].includes(selectedInterval)) {
-        return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-      } else {
-        return `${day} ${month}`;
+        rotate: -45,
+        style: {
+          fontSize: '11px'
+        },
+        hideOverlappingLabels: true
       }
     },
-    rotate: -45,
-    style: {
-      fontSize: '11px'
-    },
-    hideOverlappingLabels: true  // ✅ Add this to reduce clutter
-  }
-},*/
     yaxis: {
       tooltip: {
         enabled: true
@@ -226,13 +235,7 @@ export default function CandlestickChart({ symbol, intervals }) {
     legend: {
       show: true,
       position: 'top',
-      horizontalAlign: 'left',
-      floating: false,
-      fontSize: '12px',
-      markers: {
-        width: 12,
-        height: 12
-      }
+      horizontalAlign: 'left'
     },
     stroke: {
       width: [1, ...srLines.map(l => l.strokeWidth)]
@@ -243,7 +246,6 @@ export default function CandlestickChart({ symbol, intervals }) {
         const candleData = w.globals.initialSeries[0].data[dataPointIndex];
         if (!candleData) return '';
         
-        // Format date in IST
         const date = new Date(candleData.x);
         const dateStr = date.toLocaleString('en-IN', { 
           timeZone: 'Asia/Kolkata',
@@ -267,7 +269,6 @@ export default function CandlestickChart({ symbol, intervals }) {
             </div>
         `;
 
-        // Add S/R levels at this timestamp
         const timestamp = candleData.x;
         const score = scoreHistory.find(s => new Date(s.timestamp * 1000).getTime() === timestamp);
         if (score) {
@@ -293,15 +294,13 @@ export default function CandlestickChart({ symbol, intervals }) {
     }
   };
 
-  // Score chart options (lower panel)
+  // Score indicator chart options (lower panel)
   const scoreChartOptions = {
     chart: {
       type: 'line',
-      height: 250,
-      id: 'score',
-      brush: {
-        enabled: false
-      },
+      height: 300,
+      id: 'scores',
+      group: 'synced-charts',
       toolbar: {
         show: true,
         tools: {
@@ -315,25 +314,18 @@ export default function CandlestickChart({ symbol, intervals }) {
       },
       zoom: {
         enabled: true,
-        type: 'xy',  // Enable both X and Y axis zoom
-        autoScaleYaxis: true  // Auto-scale Y axis when zooming
+        type: 'xy',
+        autoScaleYaxis: true
       }
     },
-    colors: ['#9333EA'],
+    colors: indicatorSeries.map(s => s.color),
     stroke: {
       width: 2,
       curve: 'smooth'
     },
-    fill: {
-      type: 'gradient',
-      gradient: {
-        opacityFrom: 0.5,
-        opacityTo: 0.1
-      }
-    },
     xaxis: {
       type: 'datetime',
-      timezone: 'Asia/Kolkata',  // IST timezone
+      timezone: 'Asia/Kolkata',
       labels: {
         datetimeUTC: false,
         datetimeFormatter: {
@@ -352,7 +344,7 @@ export default function CandlestickChart({ symbol, intervals }) {
         formatter: (value) => value.toFixed(0)
       },
       title: {
-        text: 'Weighted Score'
+        text: 'Indicator Scores'
       }
     },
     grid: {
@@ -363,6 +355,11 @@ export default function CandlestickChart({ symbol, intervals }) {
       x: {
         format: 'dd MMM HH:mm'
       }
+    },
+    legend: {
+      show: true,
+      position: 'top',
+      horizontalAlign: 'center'
     },
     annotations: {
       yaxis: [
@@ -412,7 +409,6 @@ export default function CandlestickChart({ symbol, intervals }) {
     }
   };
 
-  // Main series with candles + S/R lines
   const candleSeries = [
     {
       name: 'Price',
@@ -422,18 +418,11 @@ export default function CandlestickChart({ symbol, intervals }) {
     ...srLines
   ];
 
-  // Score series
-  const scoreSeries = [{
-    name: 'Weighted Score',
-    data: weightedScoreData
-  }];
-
   return (
     <div className="bg-white rounded-2xl shadow-xl p-6">
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-2xl font-bold text-gray-800">📈 Candlestick Chart</h2>
+        <h2 className="text-2xl font-bold text-gray-800">📈 Trading View</h2>
         
-        {/* Interval Selector */}
         <select
           value={selectedInterval}
           onChange={(e) => setSelectedInterval(e.target.value)}
@@ -445,21 +434,20 @@ export default function CandlestickChart({ symbol, intervals }) {
         </select>
       </div>
 
-      {/* Tips */}
       <div className="mb-3 text-xs text-gray-500 bg-blue-50 p-2 rounded-lg">
-        💡 <strong>Zoom:</strong> Use toolbar zoom icon, then drag to select area • Scroll wheel to zoom • Right-click drag to pan • Reset button to restore
+        💡 <strong>Synced Charts:</strong> Both charts zoom/pan together • Use toolbar controls
       </div>
 
       {loading ? (
         <div className="h-96 flex items-center justify-center">
           <div className="text-gray-400">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
-            <p>Loading chart...</p>
+            <p>Loading charts...</p>
           </div>
         </div>
       ) : candles.length > 0 ? (
         <div>
-          {/* Main Candlestick Chart with S/R Lines */}
+          {/* Candlestick Chart */}
           <ReactApexChart
             options={chartOptions}
             series={candleSeries}
@@ -467,14 +455,42 @@ export default function CandlestickChart({ symbol, intervals }) {
             height={500}
           />
           
-          {/* Weighted Score Panel (below like MACD) */}
-          {weightedScoreData.length > 0 && (
+          {/* Indicator Toggle Buttons */}
+          <div className="flex flex-wrap gap-2 my-4">
+            {Object.entries({
+              weighted: { name: 'Weighted Score', color: '#FF0000' },
+              rsi: { name: 'RSI Score', color: '#9333EA' },
+              macd: { name: 'MACD Score', color: '#3B82F6' },
+              adx: { name: 'ADX Score', color: '#F97316' },
+              bb: { name: 'BB Score', color: '#10B981' },
+              sma: { name: 'SMA Score', color: '#06B6D4' },
+              supertrend: { name: 'Supertrend Score', color: '#EF4444' }
+            }).map(([key, config]) => (
+              <button
+                key={key}
+                onClick={() => toggleIndicator(key)}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                  visibleIndicators[key]
+                    ? 'text-white'
+                    : 'bg-gray-200 text-gray-600'
+                }`}
+                style={{
+                  backgroundColor: visibleIndicators[key] ? config.color : undefined
+                }}
+              >
+                {config.name}
+              </button>
+            ))}
+          </div>
+
+          {/* Score Indicator Chart (Lower Panel) */}
+          {indicatorSeries.length > 0 && (
             <div className="mt-4">
               <ReactApexChart
                 options={scoreChartOptions}
-                series={scoreSeries}
-                type="area"
-                height={250}
+                series={indicatorSeries}
+                type="line"
+                height={300}
               />
             </div>
           )}
@@ -488,9 +504,9 @@ export default function CandlestickChart({ symbol, intervals }) {
         </div>
       )}
 
-      {/* Legend for S/R Lines */}
+      {/* S/R Legend */}
       <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-        <p className="text-xs font-semibold text-gray-600 mb-2">Support/Resistance Lines (Time-based):</p>
+        <p className="text-xs font-semibold text-gray-600 mb-2">Support/Resistance Lines:</p>
         <div className="flex flex-wrap gap-3 text-xs">
           <div className="flex items-center gap-1">
             <div className="w-3 h-0.5 bg-purple-500" style={{ borderStyle: 'dashed' }}></div>

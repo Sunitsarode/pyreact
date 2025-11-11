@@ -1,6 +1,6 @@
 # ============================================
 # backend/server_app.py
-# Flask + WebSocket Server with Database Storage
+# Flask + WebSocket Server with SMA Crossover Detection
 # ============================================
 from flask import Flask, jsonify, request
 from flask_socketio import SocketIO, emit
@@ -16,7 +16,7 @@ from db_manager import (
     get_candles, get_latest_scores, get_latest_score
 )
 from data_fetcher import fetch_market_data, fetch_market_data_with_timestamps, fetch_current_price
-from indicators import calculate_all_scores
+from indicators import calculate_all_scores, calculate_sma_on_scores, detect_sma_crossover
 from notifications import send_notification
 
 # ============================================
@@ -54,9 +54,6 @@ except json.JSONDecodeError as e:
 # ============================================
 app = Flask(__name__)
 
-#CORS(app, resources={r"/*": {"origins": "*"}})
-#socketio = SocketIO(app, cors_allowed_origins="*")
-
 CORS(app, resources={
     r"/*": {
         "origins": "*",
@@ -68,7 +65,6 @@ CORS(app, resources={
     }
 })
 
-# Enhanced SocketIO with better CORS
 socketio = SocketIO(
     app, 
     cors_allowed_origins="*",
@@ -87,8 +83,9 @@ for symbol in settings['symbols']:
     init_db(symbol, settings['intervals'])
     print(f"  ✅ {symbol}: db/{symbol}.sqlite")
 
-# Alert tracking (avoid duplicate alerts)
+# Alert tracking
 last_alert_time = {}
+last_crossover_state = {}  # Track last crossover to avoid duplicate alerts
 
 def check_breakout_rules(symbol, scores_data):
     """Check if scores trigger any alerts"""
@@ -100,7 +97,6 @@ def check_breakout_rules(symbol, scores_data):
     rules = settings['breakout_rules']
     total_score = scores_data['weighted_total_score']
     
-    # Get RSI from 1h interval (or any available)
     rsi = 50
     for interval in ['1h', '15m', '5m', '1m', '1d']:
         interval_data = scores_data['intervals'].get(interval, {})
@@ -109,11 +105,10 @@ def check_breakout_rules(symbol, scores_data):
             break
     
     current_time = time.time()
-    cooldown = 300  # 5 minutes between same alerts
+    cooldown = 300
     
     alerts = []
     
-    # Check total score threshold
     if total_score > rules['total_score_threshold']:
         alert_key = f"{symbol}_buy"
         if alert_key not in last_alert_time or (current_time - last_alert_time[alert_key]) > cooldown:
@@ -132,7 +127,6 @@ def check_breakout_rules(symbol, scores_data):
             })
             last_alert_time[alert_key] = current_time
     
-    # Check RSI levels
     if rsi > rules['rsi_overbought']:
         alert_key = f"{symbol}_overbought"
         if alert_key not in last_alert_time or (current_time - last_alert_time[alert_key]) > cooldown:
@@ -151,7 +145,6 @@ def check_breakout_rules(symbol, scores_data):
             })
             last_alert_time[alert_key] = current_time
     
-    # Send alerts
     for alert in alerts:
         send_notification(alert['message'], settings)
         socketio.emit('alert', {
@@ -162,8 +155,66 @@ def check_breakout_rules(symbol, scores_data):
         })
         print(f"🔔 Alert: {alert['type']} for {symbol}")
 
+def check_sma_crossover_alerts(symbol, score_history):
+    """Check for SMA crossover and send alerts"""
+    global last_alert_time, last_crossover_state
+    
+    if not settings['notifications']['enabled']:
+        return
+    
+    # Get SMA periods from settings
+    sma_config = settings.get('score_sma', {'fast_period': 9, 'slow_period': 11})
+    fast_period = sma_config['fast_period']
+    slow_period = sma_config['slow_period']
+    
+    # Detect crossover
+    crossover_signal = detect_sma_crossover(score_history, fast_period, slow_period)
+    
+    if crossover_signal is None:
+        return
+    
+    # Check if this is a new crossover (different from last state)
+    crossover_key = f"{symbol}_sma_crossover"
+    if last_crossover_state.get(crossover_key) == crossover_signal:
+        return  # Same signal, don't alert again
+    
+    # Check cooldown
+    current_time = time.time()
+    cooldown = 300
+    
+    alert_key = f"{symbol}_crossover_{crossover_signal.lower()}"
+    if alert_key in last_alert_time and (current_time - last_alert_time[alert_key]) < cooldown:
+        return
+    
+    # Update state
+    last_crossover_state[crossover_key] = crossover_signal
+    last_alert_time[alert_key] = current_time
+    
+    # Get current score and SMAs
+    latest_score = score_history[-1]['weighted_total_score']
+    scores = [s['weighted_total_score'] for s in score_history]
+    fast_sma = calculate_sma_on_scores(scores, fast_period)
+    slow_sma = calculate_sma_on_scores(scores, slow_period)
+    
+    # Create alert
+    alert = {
+        'type': f'SMA_CROSSOVER_{crossover_signal}',
+        'message': f"{'🟢' if crossover_signal == 'BUY' else '🔴'} {symbol} SMA Crossover {crossover_signal}!\n"
+                   f"Score: {latest_score:.1f}\n"
+                   f"SMA-{fast_period}: {fast_sma:.1f} | SMA-{slow_period}: {slow_sma:.1f}"
+    }
+    
+    send_notification(alert['message'], settings)
+    socketio.emit('alert', {
+        'symbol': symbol,
+        'type': alert['type'],
+        'message': alert['message'],
+        'timestamp': int(time.time())
+    })
+    print(f"🔔 SMA Crossover Alert: {crossover_signal} for {symbol}")
+
 def background_worker():
-    """Fetch data, calculate scores, and store in database"""
+    """Fetch data, calculate scores, SMAs, and store in database"""
     while True:
         try:
             update_interval = settings['updateIntervalMinutes'] * 60
@@ -174,33 +225,27 @@ def background_worker():
                 print(f"{'='*50}")
                 
                 interval_scores = {}
-                current_price = fetch_current_price(symbol) # Fetch reliable current price
-                print(f"  💰 Fetched current price for {symbol}: {current_price}") # DEBUG LOG
+                current_price = fetch_current_price(symbol)
+                print(f"  💰 Current price: {current_price}")
                 current_timestamp = int(time.time())
                 
-                # Calculate scores for each timeframe
                 for interval in settings['intervals']:
                     candles_needed = settings['candlesPerInterval'].get(interval, 100)
                     max_candles = settings['maxCandlesStored'].get(interval, 100)
                     
-                    # Fetch data with timestamps for database
                     candles_with_ts = fetch_market_data_with_timestamps(symbol, interval, candles_needed)
                     
                     if candles_with_ts:
-                        # Save candles to database
                         save_candles(symbol, interval, candles_with_ts, max_candles)
                         
-                        # Fetch data for calculations (dict format)
                         data = fetch_market_data(symbol, interval, candles_needed)
                         
                         if data:
-                            # Calculate scores and support/resistance
                             scores = calculate_all_scores(data, interval)
                             interval_scores[interval] = scores
                             
                             print(f"  ✅ {interval}: Score = {scores['total_score']:.1f} | S/R = {scores['support']:.2f} / {scores['resistance']:.2f}")
 
-                # Weighted total score calculation is now independent of price fetching
                 if interval_scores:
                     weights = settings['timeframeWeights']
                     weighted_total = 0
@@ -213,14 +258,12 @@ def background_worker():
                     
                     final_score = weighted_total / total_weight if total_weight > 0 else 0
                     
-                    # Prepare scores data for database
                     scores_data = {
                         'timestamp': current_timestamp,
                         'weighted_total_score': round(final_score, 2),
                         'intervals': {}
                     }
                     
-                    # Add interval data
                     for interval, scores in interval_scores.items():
                         scores_data['intervals'][interval] = {
                             'total_score': scores['total_score'],
@@ -236,19 +279,46 @@ def background_worker():
                             'current_price': scores.get('current_price', 0)
                         }
                     
-                    # Save to database
                     save_indicator_scores(symbol, scores_data)
                     
-                    # Check for alerts
+                    # Get score history for SMA calculation
+                    score_history = get_latest_scores(symbol, limit=100)
+                    
+                    # Calculate SMAs on weighted scores
+                    sma_config = settings.get('score_sma', {'fast_period': 9, 'slow_period': 11})
+                    fast_period = sma_config['fast_period']
+                    slow_period = sma_config['slow_period']
+                    
+                    if len(score_history) >= max(fast_period, slow_period):
+                        scores_list = [s['weighted_total_score'] for s in score_history]
+                        fast_sma = calculate_sma_on_scores(scores_list, fast_period)
+                        slow_sma = calculate_sma_on_scores(scores_list, slow_period)
+                        
+                        print(f"  📈 SMA-{fast_period}: {fast_sma:.2f} | SMA-{slow_period}: {slow_sma:.2f}")
+                        
+                        # Add SMAs to data for frontend
+                        scores_data['sma_fast'] = fast_sma
+                        scores_data['sma_slow'] = slow_sma
+                        scores_data['sma_fast_period'] = fast_period
+                        scores_data['sma_slow_period'] = slow_period
+                    
+                    # Check for crossover alerts
+                    check_sma_crossover_alerts(symbol, score_history)
+                    
+                    # Check other alerts
                     check_breakout_rules(symbol, scores_data)
                     
-                    # Emit to WebSocket clients
+                    # Emit to WebSocket
                     socketio.emit('score_update', {
                         'symbol': symbol,
                         'timestamp': current_timestamp,
                         'weighted_total_score': final_score,
                         'current_price': current_price,
-                        'intervals': scores_data['intervals']
+                        'intervals': scores_data['intervals'],
+                        'sma_fast': scores_data.get('sma_fast'),
+                        'sma_slow': scores_data.get('sma_slow'),
+                        'sma_fast_period': scores_data.get('sma_fast_period'),
+                        'sma_slow_period': scores_data.get('sma_slow_period')
                     })
                     
                     print(f"\n  🎯 Final Weighted Score: {final_score:.2f}")
@@ -269,37 +339,31 @@ def background_worker():
 
 @app.route('/api/symbols')
 def get_symbols():
-    """Get list of configured symbols"""
     return jsonify(settings['symbols'])
 
 @app.route('/api/settings')
 def get_settings():
-    """Get current settings"""
     return jsonify(settings)
 
 @app.route('/api/candles/<symbol>/<interval>')
 def get_candles_api(symbol, interval):
-    """Get candles for a specific symbol and interval"""
     limit = int(request.args.get('limit', 100))
     candles = get_candles(symbol, interval, limit)
     return jsonify(candles)
 
 @app.route('/api/scores/<symbol>')
 def get_scores_api(symbol):
-    """Get latest score for a symbol"""
     score = get_latest_score(symbol)
     return jsonify(score if score else {})
 
 @app.route('/api/scores/<symbol>/history')
 def get_scores_history_api(symbol):
-    """Get score history for a symbol"""
     limit = int(request.args.get('limit', 100))
     scores = get_latest_scores(symbol, limit)
     return jsonify(scores)
 
 @app.route('/api/health')
 def health_check():
-    """Health check endpoint"""
     return jsonify({"status": "ok", "timestamp": datetime.now().isoformat()})
 
 # ============================================
@@ -309,7 +373,6 @@ def health_check():
 @socketio.on('connect')
 def handle_connect():
     print('🔌 Client connected')
-    # Send latest scores for all symbols
     for symbol in settings['symbols']:
         score = get_latest_score(symbol)
         if score:
@@ -329,7 +392,6 @@ def handle_disconnect():
 # ============================================
 
 if __name__ == '__main__':
-    # Start background worker thread
     worker = threading.Thread(target=background_worker, daemon=True)
     worker.start()
     

@@ -1,6 +1,6 @@
 # ============================================
 # backend/indicators.py
-# Enhanced with Support/Resistance Calculation
+# Enhanced with Support/Resistance + SMA on Score
 # ============================================
 import pandas as pd
 import pandas_ta as pta
@@ -83,7 +83,7 @@ def calculate_supertrend_score(high, low, close):
     if supertrend is None or supertrend.empty:
         return 0
     
-    direction = supertrend.iloc[-1, 1]  # Direction column
+    direction = supertrend.iloc[-1, 1]
     return 100 if direction == 1 else -100 if direction == -1 else 0
 
 def calculate_support_resistance(high, low, close, lookback=20):
@@ -92,37 +92,29 @@ def calculate_support_resistance(high, low, close, lookback=20):
     Returns: (support, resistance)
     """
     try:
-        # Convert to pandas Series if not already
         high = pd.Series(high) if not isinstance(high, pd.Series) else high
         low = pd.Series(low) if not isinstance(low, pd.Series) else low
         close = pd.Series(close) if not isinstance(close, pd.Series) else close
         
-        # Get recent data
         recent_high = high.tail(lookback)
         recent_low = low.tail(lookback)
         recent_close = close.tail(lookback)
         
-        # Calculate pivot point (simple method)
         pivot = (recent_high.max() + recent_low.min() + recent_close.iloc[-1]) / 3
         
-        # Resistance levels
         resistance1 = (2 * pivot) - recent_low.min()
         resistance2 = pivot + (recent_high.max() - recent_low.min())
         
-        # Support levels
         support1 = (2 * pivot) - recent_high.max()
         support2 = pivot - (recent_high.max() - recent_low.min())
         
-        # Use closest levels to current price
         current_price = recent_close.iloc[-1]
         
-        # Find appropriate resistance (above current price)
         if resistance1 > current_price:
             resistance = resistance1
         else:
             resistance = resistance2
         
-        # Find appropriate support (below current price)
         if support1 < current_price:
             support = support1
         else:
@@ -132,7 +124,6 @@ def calculate_support_resistance(high, low, close, lookback=20):
     
     except Exception as e:
         print(f"  ⚠️  Support/Resistance calculation error: {e}")
-        # Return current price as fallback
         current = close.iloc[-1] if len(close) > 0 else 0
         return current * 0.98, current * 1.02
 
@@ -146,7 +137,6 @@ def calculate_all_scores(data, interval):
     low = pd.Series(data['low'])
     current_price = data['close'][-1]
     
-    # Calculate individual scores
     rsi_score, rsi_value = calculate_rsi_score(close)
     macd_score = calculate_macd_score(close)
     adx_score = calculate_adx_score(high, low, close)
@@ -154,7 +144,6 @@ def calculate_all_scores(data, interval):
     sma_score = calculate_sma_score(close, current_price)
     supertrend_score = calculate_supertrend_score(high, low, close)
     
-    # Calculate support and resistance
     support, resistance = calculate_support_resistance(high, low, close)
     
     scores = {
@@ -171,7 +160,6 @@ def calculate_all_scores(data, interval):
         'resistance': resistance
     }
     
-    # Calculate average score for this interval
     score_values = [
         rsi_score, macd_score, adx_score, 
         bb_score, sma_score, supertrend_score
@@ -183,3 +171,54 @@ def calculate_all_scores(data, interval):
     scores['total_score'] = round(interval_score, 2)
     
     return scores
+
+def calculate_sma_on_scores(score_values, period):
+    """
+    Calculate SMA on score values (not price)
+    score_values: list of score numbers
+    period: SMA period (e.g., 9, 11)
+    Returns: SMA value or None if not enough data
+    """
+    if len(score_values) < period:
+        return None
+    
+    scores_series = pd.Series(score_values)
+    sma = scores_series.rolling(window=period).mean()
+    
+    if sma.empty or pd.isna(sma.iloc[-1]):
+        return None
+    
+    return round(sma.iloc[-1], 2)
+
+def detect_sma_crossover(score_history, fast_period=9, slow_period=11):
+    """
+    Detect SMA crossover on weighted score history
+    Returns: 'BUY', 'SELL', or None
+    """
+    if len(score_history) < max(fast_period, slow_period) + 1:
+        return None
+    
+    # Extract weighted scores
+    scores = [s.get('weighted_total_score', 0) for s in score_history]
+    
+    # Calculate SMAs
+    fast_sma_current = calculate_sma_on_scores(scores, fast_period)
+    slow_sma_current = calculate_sma_on_scores(scores, slow_period)
+    
+    # Calculate previous SMAs (1 candle back)
+    fast_sma_prev = calculate_sma_on_scores(scores[:-1], fast_period)
+    slow_sma_prev = calculate_sma_on_scores(scores[:-1], slow_period)
+    
+    if None in [fast_sma_current, slow_sma_current, fast_sma_prev, slow_sma_prev]:
+        return None
+    
+    # Detect crossover
+    # BUY: Fast crosses above Slow
+    if fast_sma_prev <= slow_sma_prev and fast_sma_current > slow_sma_current:
+        return 'BUY'
+    
+    # SELL: Fast crosses below Slow
+    if fast_sma_prev >= slow_sma_prev and fast_sma_current < slow_sma_current:
+        return 'SELL'
+    
+    return None

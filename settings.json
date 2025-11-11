@@ -1,5 +1,5 @@
 {
-  "symbols": ["BTC-USD", "^NSEI"] ,
+  "symbols": ["BTC-USD", "^NSEI"],
   "intervals": ["1d", "1h", "15m", "5m", "1m"],
   "updateIntervalMinutes": 5,
   "candlesPerInterval": {
@@ -23,6 +23,10 @@
     "5m": 0.20,
     "1m": 0.15
   },
+  "score_sma": {
+    "fast_period": 9,
+    "slow_period": 11
+  },
   "api_server": {
     "host": "0.0.0.0",
     "port": 5001
@@ -31,7 +35,7 @@
     "port": 3000
   },
   "notifications": {
-    "enabled": false,
+    "enabled": true,
     "method": "telegram",
     "telegram": {
       "token": "7250092480:AAHPFLK_OmYFbIZbMGbp5RCHTiI1-VIlFCQ",
