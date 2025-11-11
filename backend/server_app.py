@@ -254,6 +254,7 @@ def background_worker():
                     print(f"\n  🎯 Final Weighted Score: {final_score:.2f}")
                     print(f"  💾 Saved to database: db/{symbol}.sqlite")
             
+            print("\n✅ Background worker finished update cycle for all symbols.")
         except Exception as e:
             print(f"❌ Error in background worker: {e}")
             import traceback

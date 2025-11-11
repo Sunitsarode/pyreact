@@ -43,17 +43,18 @@ export default function SymbolPage() {
   useEffect(() => {
     websocket.connect();
 
-    websocket.on('connect', () => setConnected(true));
-    websocket.on('disconnect', () => setConnected(false));
+    const handleConnect = () => setConnected(true);
+    const handleDisconnect = () => setConnected(false);
     
-    websocket.on('score_update', (data) => {
+    const handleScoreUpdate = (data) => {
+      console.log('Received score_update:', data, 'Current symbol:', symbol); // DEBUG LOG
       if (data.symbol === symbol) {
         setCurrentScore(data);
         setScoreHistory(prev => [...prev, data].slice(-100));
       }
-    });
+    };
 
-    websocket.on('alert', (data) => {
+    const handleAlert = (data) => {
       if (data.symbol === symbol) {
         setAlerts(prev => [data, ...prev].slice(0, 10));
         if (Notification.permission === 'granted') {
@@ -63,9 +64,18 @@ export default function SymbolPage() {
           });
         }
       }
-    });
+    };
+
+    websocket.on('connect', handleConnect);
+    websocket.on('disconnect', handleDisconnect);
+    websocket.on('score_update', handleScoreUpdate);
+    websocket.on('alert', handleAlert);
 
     return () => {
+      websocket.off('connect', handleConnect);
+      websocket.off('disconnect', handleDisconnect);
+      websocket.off('score_update', handleScoreUpdate);
+      websocket.off('alert', handleAlert);
       websocket.disconnect();
     };
   }, [symbol]);
@@ -99,6 +109,7 @@ export default function SymbolPage() {
   const loadScoreHistory = async () => {
     try {
       const response = await axios.get(`${API_URL}/scores/${symbol}/history?limit=100`);
+      console.log('Score History:', response.data); // DEBUG LOG
       setScoreHistory(response.data);
       if (response.data.length > 0) {
         setCurrentScore(response.data[response.data.length - 1]);

@@ -58,21 +58,7 @@ def init_db(symbol, intervals):
         CREATE TABLE IF NOT EXISTS indicators_score (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp INTEGER UNIQUE,
-            score_1d REAL,
-            score_1h REAL,
-            score_15m REAL,
-            score_5m REAL,
-            score_1m REAL,
-            support_1d REAL,
-            resistance_1d REAL,
-            support_1h REAL,
-            resistance_1h REAL,
-            support_15m REAL,
-            resistance_15m REAL,
-            support_5m REAL,
-            resistance_5m REAL,
-            support_1m REAL,
-            resistance_1m REAL,
+            intervals_json TEXT,
             weighted_total_score REAL
         )
     ''')
@@ -139,11 +125,7 @@ def save_indicator_scores(symbol, scores_dict, max_scores=500):
     Save indicator scores to database
     scores_dict: {
         'timestamp': int,
-        'intervals': {
-            '1d': {'total_score': float, 'support': float, 'resistance': float},
-            '1h': {...},
-            ...
-        },
+        'intervals': { ... },
         'weighted_total_score': float
     }
     """
@@ -151,40 +133,14 @@ def save_indicator_scores(symbol, scores_dict, max_scores=500):
     cursor = conn.cursor()
     
     timestamp = scores_dict['timestamp']
-    intervals_data = scores_dict.get('intervals', {})
+    intervals_json = json.dumps(scores_dict.get('intervals', {}))
     weighted_score = scores_dict.get('weighted_total_score', 0)
-    
-    # Prepare values
-    score_1d = intervals_data.get('1d', {}).get('total_score', 0)
-    score_1h = intervals_data.get('1h', {}).get('total_score', 0)
-    score_15m = intervals_data.get('15m', {}).get('total_score', 0)
-    score_5m = intervals_data.get('5m', {}).get('total_score', 0)
-    score_1m = intervals_data.get('1m', {}).get('total_score', 0)
-    
-    support_1d = intervals_data.get('1d', {}).get('support', 0)
-    resistance_1d = intervals_data.get('1d', {}).get('resistance', 0)
-    support_1h = intervals_data.get('1h', {}).get('support', 0)
-    resistance_1h = intervals_data.get('1h', {}).get('resistance', 0)
-    support_15m = intervals_data.get('15m', {}).get('support', 0)
-    resistance_15m = intervals_data.get('15m', {}).get('resistance', 0)
-    support_5m = intervals_data.get('5m', {}).get('support', 0)
-    resistance_5m = intervals_data.get('5m', {}).get('resistance', 0)
-    support_1m = intervals_data.get('1m', {}).get('support', 0)
-    resistance_1m = intervals_data.get('1m', {}).get('resistance', 0)
     
     cursor.execute('''
         INSERT OR REPLACE INTO indicators_score
-        (timestamp, score_1d, score_1h, score_15m, score_5m, score_1m,
-         support_1d, resistance_1d, support_1h, resistance_1h,
-         support_15m, resistance_15m, support_5m, resistance_5m,
-         support_1m, resistance_1m, weighted_total_score)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        timestamp, score_1d, score_1h, score_15m, score_5m, score_1m,
-        support_1d, resistance_1d, support_1h, resistance_1h,
-        support_15m, resistance_15m, support_5m, resistance_5m,
-        support_1m, resistance_1m, weighted_score
-    ))
+        (timestamp, intervals_json, weighted_total_score)
+        VALUES (?, ?, ?)
+    ''', (timestamp, intervals_json, weighted_score))
     
     conn.commit()
     
@@ -242,7 +198,8 @@ def get_latest_scores(symbol, limit=100):
     cursor = conn.cursor()
     
     cursor.execute('''
-        SELECT * FROM indicators_score
+        SELECT timestamp, weighted_total_score, intervals_json
+        FROM indicators_score
         ORDER BY timestamp DESC
         LIMIT ?
     ''', (limit,))
@@ -256,33 +213,7 @@ def get_latest_scores(symbol, limit=100):
         scores.append({
             'timestamp': row['timestamp'],
             'weighted_total_score': row['weighted_total_score'],
-            'intervals': {
-                '1d': {
-                    'score': row['score_1d'],
-                    'support': row['support_1d'],
-                    'resistance': row['resistance_1d']
-                },
-                '1h': {
-                    'score': row['score_1h'],
-                    'support': row['support_1h'],
-                    'resistance': row['resistance_1h']
-                },
-                '15m': {
-                    'score': row['score_15m'],
-                    'support': row['support_15m'],
-                    'resistance': row['resistance_15m']
-                },
-                '5m': {
-                    'score': row['score_5m'],
-                    'support': row['support_5m'],
-                    'resistance': row['resistance_5m']
-                },
-                '1m': {
-                    'score': row['score_1m'],
-                    'support': row['support_1m'],
-                    'resistance': row['resistance_1m']
-                }
-            }
+            'intervals': json.loads(row['intervals_json'])
         })
     
     return scores
