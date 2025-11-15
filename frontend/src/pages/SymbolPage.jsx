@@ -6,6 +6,7 @@ import ScoreDisplay from '../components/ScoreDisplay';
 import IntervalBreakdown from '../components/IntervalBreakdown';
 import CandlestickChart from '../components/CandlestickChart';
 import IndicatorsChart from '../components/IndicatorsChart';
+import MasterScoreChart from '../components/MasterScoreChart';
 import AlertRules from '../components/AlertRules';
 import { API_URL } from '../utils/api';
 /*
@@ -27,7 +28,9 @@ export default function SymbolPage() {
   const [connected, setConnected] = useState(false);
   const [currentScore, setCurrentScore] = useState({
     timestamp: 0,
-    weighted_total_score: 0,
+    master_score: 0,
+    classification: 'NEUTRAL',
+    weighted_indicators: {},
     intervals: {}
   });
   const [scoreHistory, setScoreHistory] = useState([]);
@@ -236,6 +239,11 @@ export default function SymbolPage() {
           <IndicatorsChart 
             scoreHistory={scoreHistory}
             threshold={settings.breakout_rules?.total_score_threshold || 30}
+          />
+
+          {/* Master Score Chart with SMAs */}
+          <MasterScoreChart 
+            scoreHistory={scoreHistory}
           />
         </div>
 

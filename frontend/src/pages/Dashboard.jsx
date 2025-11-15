@@ -69,7 +69,7 @@ export default function Dashboard() {
           console.log(`📊 Loading score for ${symbol}`);
           const scoreResponse = await axios.get(`${API_URL}/scores/${symbol}`);
           if (scoreResponse.data && Object.keys(scoreResponse.data).length > 0) {
-            console.log(`✅ Score loaded for ${symbol}:`, scoreResponse.data.weighted_total_score);
+            console.log(`✅ Score loaded for ${symbol}:`, scoreResponse.data.master_score);
             setSymbolData(prev => ({
               ...prev,
               [symbol]: scoreResponse.data
@@ -90,10 +90,9 @@ export default function Dashboard() {
     }
   };
 
-  const getScoreColor = (score) => {
-    const threshold = settings.breakout_rules?.total_score_threshold || 30;
-    if (score > threshold) return 'from-green-500 to-green-600';
-    if (score < -threshold) return 'from-red-500 to-red-600';
+  const getScoreColor = (classification) => {
+    if (classification?.includes('BULLISH')) return 'from-green-500 to-green-600';
+    if (classification?.includes('BEARISH')) return 'from-red-500 to-red-600';
     return 'from-blue-500 to-blue-600';
   };
 
@@ -104,10 +103,11 @@ export default function Dashboard() {
     return 'text-blue-600';
   };
 
-  const getScoreStatus = (score) => {
-    const threshold = settings.breakout_rules?.total_score_threshold || 30;
-    if (score > threshold) return { icon: '🚀', text: 'BULLISH' };
-    if (score < -threshold) return { icon: '⚠️', text: 'BEARISH' };
+  const getScoreStatus = (classification) => {
+    if (classification === 'STRONG_BULLISH') return { icon: '🚀', text: 'STRONG BULL' };
+    if (classification === 'BULLISH') return { icon: '📈', text: 'BULLISH' };
+    if (classification === 'STRONG_BEARISH') return { icon: '⚠️', text: 'STRONG BEAR' };
+    if (classification === 'BEARISH') return { icon: '📉', text: 'BEARISH' };
     return { icon: '↔️', text: 'NEUTRAL' };
   };
 
@@ -170,9 +170,10 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {symbols.map(symbol => {
               const data = symbolData[symbol] || {};
-              const score = data.weighted_total_score || 0;
+              const score = data.master_score || 0;
+              const classification = data.classification || 'NEUTRAL';
               const price = data.current_price || 0;
-              const status = getScoreStatus(score);
+              const status = getScoreStatus(classification);
               
               return (
                 <div
@@ -203,8 +204,8 @@ export default function Dashboard() {
                   </div>
 
                   {/* Score Display */}
-                  <div className={`bg-gradient-to-r ${getScoreColor(score)} rounded-xl p-4 text-white mb-3`}>
-                    <p className="text-sm opacity-90 mb-1">Weighted Score</p>
+                  <div className={`bg-gradient-to-r ${getScoreColor(classification)} rounded-xl p-4 text-white mb-3`}>
+                    <p className="text-sm opacity-90 mb-1">Master Score</p>
                     <div className="flex justify-between items-center">
                       <p className="text-4xl font-bold">{score.toFixed(1)}</p>
                       <p className="text-lg font-semibold">{status.text}</p>
@@ -214,7 +215,7 @@ export default function Dashboard() {
                   {/* Mini Progress Bar */}
                   <div className="w-full bg-gray-200 rounded-full h-2 mb-3">
                     <div 
-                      className={`h-2 rounded-full bg-gradient-to-r ${getScoreColor(score)}`}
+                      className={`h-2 rounded-full bg-gradient-to-r ${getScoreColor(classification)}`}
                       style={{ width: `${((score + 100) / 200) * 100}%` }}
                     ></div>
                   </div>

@@ -4,7 +4,7 @@ import axios from 'axios';
 import { API_URL } from '../utils/api';
 
 export default function CandlestickChart({ symbol, intervals }) {
-  const [selectedInterval, setSelectedInterval] = useState('1h');
+  const [selectedInterval, setSelectedInterval] = useState('5m');
   const [candles, setCandles] = useState([]);
   const [scoreHistory, setScoreHistory] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -385,8 +385,7 @@ export default function CandlestickChart({ symbol, intervals }) {
             borderColor: '#3B82F6',
             style: {
               color: '#fff',
-              background: '#3B82F6',
-              fontSize: '10px'
+              background: '#3B82F6'
             },
             text: '0'
           }
@@ -399,8 +398,7 @@ export default function CandlestickChart({ symbol, intervals }) {
             borderColor: '#EF4444',
             style: {
               color: '#fff',
-              background: '#EF4444',
-              fontSize: '10px'
+              background: '#EF4444'
             },
             text: '-30'
           }

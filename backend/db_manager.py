@@ -59,7 +59,10 @@ def init_db(symbol, intervals):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp INTEGER UNIQUE,
             intervals_json TEXT,
-            weighted_total_score REAL
+            master_score REAL,
+            classification TEXT,
+            weighted_indicators_json TEXT,
+            interval_smas_json TEXT
         )
     ''')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_indicators_ts ON indicators_score(timestamp DESC)')
@@ -126,7 +129,10 @@ def save_indicator_scores(symbol, scores_dict, max_scores=500):
     scores_dict: {
         'timestamp': int,
         'intervals': { ... },
-        'weighted_total_score': float
+        'master_score': float,
+        'classification': str,
+        'weighted_indicators': dict,
+        'interval_smas': dict # New field
     }
     """
     conn = get_connection(symbol)
@@ -134,16 +140,18 @@ def save_indicator_scores(symbol, scores_dict, max_scores=500):
     
     timestamp = scores_dict['timestamp']
     intervals_json = json.dumps(scores_dict.get('intervals', {}))
-    weighted_score = scores_dict.get('weighted_total_score', 0)
+    master_score = scores_dict.get('master_score', 0)
+    classification = scores_dict.get('classification', 'NEUTRAL')
+    weighted_indicators_json = json.dumps(scores_dict.get('weighted_indicators', {}))
+    interval_smas_json = json.dumps(scores_dict.get('interval_smas', {})) # New line
     
     cursor.execute('''
         INSERT OR REPLACE INTO indicators_score
-        (timestamp, intervals_json, weighted_total_score)
-        VALUES (?, ?, ?)
-    ''', (timestamp, intervals_json, weighted_score))
+        (timestamp, intervals_json, master_score, classification, weighted_indicators_json, interval_smas_json)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (timestamp, intervals_json, master_score, classification, weighted_indicators_json, interval_smas_json))
     
-    conn.commit()
-    
+    conn.commit()    
     # Cleanup old scores
     cursor.execute('SELECT COUNT(*) FROM indicators_score')
     total = cursor.fetchone()[0]
@@ -198,7 +206,7 @@ def get_latest_scores(symbol, limit=100):
     cursor = conn.cursor()
     
     cursor.execute('''
-        SELECT timestamp, weighted_total_score, intervals_json
+        SELECT timestamp, master_score, classification, intervals_json, weighted_indicators_json, interval_smas_json
         FROM indicators_score
         ORDER BY timestamp DESC
         LIMIT ?
@@ -212,12 +220,14 @@ def get_latest_scores(symbol, limit=100):
     for row in reversed(rows):
         scores.append({
             'timestamp': row['timestamp'],
-            'weighted_total_score': row['weighted_total_score'],
-            'intervals': json.loads(row['intervals_json'])
+            'master_score': row['master_score'],
+            'classification': row['classification'],
+            'intervals': json.loads(row['intervals_json']),
+            'weighted_indicators': json.loads(row['weighted_indicators_json'] or '{}'),
+            'interval_smas': json.loads(row['interval_smas_json'] or '{}')
         })
     
     return scores
-
 def get_latest_score(symbol):
     """Get the most recent score"""
     scores = get_latest_scores(symbol, limit=1)

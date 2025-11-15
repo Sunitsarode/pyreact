@@ -1,31 +1,33 @@
 {
-  "symbols": ["BTC-USD", "^NSEI"],
-  "intervals": ["1d", "1h", "15m", "5m", "1m"],
-  "updateIntervalMinutes": 5,
+  "symbols": ["BTC-USD", "^NSEI", "^BSESN", "RELIANCE.NS", "TCS.NS", "INFY.NS"],
+  "intervals": ["1m", "5m", "1h"],
+  "updateIntervalMinutes": 1,
   "candlesPerInterval": {
     "1m": 100,
     "5m": 100,
-    "15m": 100,
-    "1h": 100,
-    "1d": 100
+    "1h": 100
   },
   "maxCandlesStored": {
     "1m": 100,
     "5m": 100,
-    "15m": 100,
-    "1h": 100,
-    "1d": 200
+    "1h": 200
   },
   "timeframeWeights": {
-    "1d": 0.15,
-    "1h": 0.20,
-    "15m": 0.20,
-    "5m": 0.20,
-    "1m": 0.15
+    "1m": 0.35,
+    "5m": 0.45,
+    "1h": 0.20
   },
-  "score_sma": {
-    "fast_period": 9,
-    "slow_period": 11
+  "indicator_weights": {
+    "rsi": 0.25,
+    "macd": 0.30,
+    "adx": 0.20,
+    "supertrend": 0.25
+  },
+  "master_score_thresholds": {
+    "strong_bullish": 65,
+    "bullish": 55,
+    "neutral_low": 45,
+    "bearish": 35
   },
   "api_server": {
     "host": "0.0.0.0",
@@ -38,16 +40,53 @@
     "enabled": true,
     "method": "telegram",
     "telegram": {
-      "token": "7250092480:AAHPFLK_OmYFbIZbMGbp5RCHTiI1-VIlFCQ",
-      "chat_id": "926220059"
+      "token": "YOUR_BOT_TOKEN",
+      "chat_id": "YOUR_CHAT_ID"
     },
     "ntfy": {
-      "endpoint": "https://ntfy.sh/sumit_push_notes"
+      "endpoint": "https://ntfy.sh/your-topic"
     }
   },
-  "breakout_rules": {
-    "total_score_threshold": 30,
-    "rsi_overbought": 70,
-    "rsi_oversold": 30
+  "risk_management": {
+    "risk_per_trade_percent": 1.5,
+    "max_concurrent_positions": 3,
+    "max_trades_per_hour": 2,
+    "daily_loss_limit_percent": 4,
+    "min_risk_reward_ratio": 2.0,
+    "cooldown_minutes": 10
+  },
+  "market_filters": {
+    "min_adx": 20,
+    "max_atr_multiplier": 2.0,
+    "avoid_news_minutes": 30,
+    "avoid_session_start_minutes": 15,
+    "avoid_session_end_minutes": 15
+  },
+  "entry_rules": {
+    "reversal": {
+      "rsi_extreme_overbought": 70,
+      "rsi_extreme_oversold": 30,
+      "sr_distance_percent": 1.0,
+      "min_adx": 25
+    },
+    "breakout": {
+      "breakout_distance_percent": 0.2,
+      "volume_multiplier": 1.5,
+      "consolidation_candles": 3
+    }
+  },
+  "exit_rules": {
+    "target_risk_reward": 2.0,
+    "time_based_exit_hours": 4,
+    "trailing_stop": {
+      "breakeven_rr": 1.0,
+      "trail_rr": 1.5,
+      "trail_percent": 50
+    }
+  },
+  "stop_loss": {
+    "swing_offset_percent": 0.1,
+    "atr_multiplier": 2.0,
+    "use_supertrend_1h": true
   }
 }

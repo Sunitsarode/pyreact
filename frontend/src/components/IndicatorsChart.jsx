@@ -15,16 +15,10 @@ const API_URL = getApiURL();*/
 console.log('🔍 IndicatorsChart.jsx API_URL:', API_URL);  // ← Add this line
 
 export default function IndicatorsChart({ scoreHistory, threshold }) {
-  const [selectedInterval, setSelectedInterval] = useState('1h');
+  const [selectedInterval, setSelectedInterval] = useState('5m');
   const [visibleIndicators, setVisibleIndicators] = useState({
     avgWeightedScore: true,
-    avgScore: true,
-    rsi: false,
-    macd: false,
-    adx: false,
-    bb: false,
-    sma: false,
-    supertrend: false
+    avgScore: true
   });
 
   const intervals = ['1d', '1h', '15m', '5m', '1m'];
@@ -46,15 +40,8 @@ export default function IndicatorsChart({ scoreHistory, threshold }) {
   // Prepare data for chart
   const timestamps = scoreHistory.map(s => s.timestamp * 1000);
   
-  const getIndicatorData = (indicatorKey) => {
-    return scoreHistory.map(s => {
-      const intervalData = s.intervals?.[selectedInterval];
-      return intervalData?.[`${indicatorKey}_score`] || 0;
-    });
-  };
-
   const getAvgWeightedScoreData = () => {
-    return scoreHistory.map(s => s.weighted_total_score || 0);
+    return scoreHistory.map(s => s.master_score || 0);
   };
 
   const getAvgScoreData = () => {
@@ -65,14 +52,8 @@ export default function IndicatorsChart({ scoreHistory, threshold }) {
   };
 
   const indicatorConfig = {
-    avgWeightedScore: { name: 'Avg Weighted Score', color: '#FF0000', data: getAvgWeightedScoreData() },
-    avgScore: { name: 'Avg Score', color: '#0000FF', data: getAvgScoreData() },
-    rsi: { name: 'RSI', color: '#9333EA', data: getIndicatorData('rsi') },
-    macd: { name: 'MACD', color: '#3B82F6', data: getIndicatorData('macd') },
-    adx: { name: 'ADX', color: '#F97316', data: getIndicatorData('adx') },
-    bb: { name: 'Bollinger Bands', color: '#10B981', data: getIndicatorData('bb') },
-    sma: { name: 'SMA', color: '#06B6D4', data: getIndicatorData('sma') },
-    supertrend: { name: 'Supertrend', color: '#EF4444', data: getIndicatorData('supertrend') }
+    avgWeightedScore: { name: 'Master Score', color: '#FF0000', data: getAvgWeightedScoreData() },
+    avgScore: { name: 'Avg Score', color: '#0000FF', data: getAvgScoreData() }
   };
 
   const series = Object.entries(indicatorConfig)

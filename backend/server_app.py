@@ -1,6 +1,6 @@
 # ============================================
 # backend/server_app.py
-# Flask + WebSocket Server with SMA Crossover Detection
+# Updated Flask Server with Trading Engine
 # ============================================
 from flask import Flask, jsonify, request
 from flask_socketio import SocketIO, emit
@@ -15,22 +15,33 @@ import sqlite3
 
 from db_manager import (
     init_db, save_candles, save_indicator_scores,
-    get_candles, get_latest_scores, get_latest_score, get_db_path, sanitize_interval,
-    get_indicator_scores_history
+    get_candles, get_latest_scores, get_latest_score, get_db_path, sanitize_interval
 )
 from data_fetcher import fetch_market_data, fetch_market_data_with_timestamps, fetch_current_price
-from indicators import calculate_all_scores, calculate_sma_on_scores, detect_sma_crossover
-from notifications import send_notification
+from indicators import (
+    calculate_all_scores, calculate_master_score, calculate_weighted_indicators,
+    calculate_sma, calculate_master_score_for_interval
+)
+from trading_engine import TradingEngine
+from position_manager import PositionManager
+from notifications import (
+    send_notification, format_long_entry_signal, format_short_entry_signal,
+    format_exit_signal, format_setup_alert, format_trailing_stop_update,
+    format_daily_summary, format_risk_warning
+)
 
 # ============================================
 # CLI Argument Parsing
 # ============================================
 parser = argparse.ArgumentParser(description='Live Analyser Backend Server')
 parser.add_argument('--config', type=str, default='../settings.json', 
-                    help='Path to settings JSON file (default: settings.json)')
+                    help='Path to settings JSON file')
+parser.add_argument('--account-balance', type=float, default=10000,
+                    help='Account balance for position sizing')
 args = parser.parse_args()
 
 config_file = args.config
+ACCOUNT_BALANCE = args.account_balance
 
 # ============================================
 # Load Settings
@@ -44,9 +55,9 @@ try:
         settings = json.load(f)
     print(f"✅ Configuration loaded successfully!")
     print(f"📊 Symbols: {', '.join(settings['symbols'])}")
+    print(f"💰 Account Balance: ${ACCOUNT_BALANCE:,.2f}")
 except FileNotFoundError:
     print(f"❌ Error: Config file '{config_file}' not found!")
-    print(f"💡 Usage: python server_app.py --config your_settings.json")
     exit(1)
 except json.JSONDecodeError as e:
     print(f"❌ Error: Invalid JSON in config file: {e}")
@@ -78,6 +89,10 @@ socketio = SocketIO(
     ping_interval=25
 )
 
+# Initialize systems
+trading_engine = TradingEngine(settings)
+position_manager = PositionManager()
+
 # Initialize databases for all symbols
 print(f"\n{'='*60}")
 print(f"🗄️  Initializing databases...")
@@ -86,283 +101,433 @@ for symbol in settings['symbols']:
     init_db(symbol, settings['intervals'])
     print(f"  ✅ {symbol}: db/{symbol}.sqlite")
 
-# Alert tracking
-last_alert_time = {}
-last_crossover_state = {}  # Track last crossover to avoid duplicate alerts
+# ADX history for breakout detection
+adx_history = {}
 
-def update_symbol_data(symbol):
-    """Fetch data, calculate scores, and store in the database for a single symbol."""
+def update_symbol_data(symbol, historical_limit=None):
+    """Fetch data, calculate scores, detect signals"""
     print(f"\n{'='*50}")
     print(f"📊 Updating {symbol} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*50}")
     
     interval_scores = {}
     current_price = fetch_current_price(symbol)
-    print(f"  💰 Current price: {current_price}")
+    print(f"  💰 Current price: ${current_price:.2f}")
     current_timestamp = int(time.time())
     
+    # Fetch and calculate scores for each interval
     for interval in settings['intervals']:
         candles_needed = settings['candlesPerInterval'].get(interval, 100)
         max_candles = settings['maxCandlesStored'].get(interval, 100)
         
-        candles_with_ts = fetch_market_data_with_timestamps(symbol, interval, candles_needed)
+        # Use historical_limit if provided, otherwise use default candles_needed
+        fetch_limit = historical_limit if historical_limit else candles_needed 
+        
+        candles_with_ts = fetch_market_data_with_timestamps(symbol, interval, fetch_limit)
         
         if candles_with_ts:
             save_candles(symbol, interval, candles_with_ts, max_candles)
-            
-            data = fetch_market_data(symbol, interval, candles_needed)
+            data = fetch_market_data(symbol, interval, fetch_limit)
             
             if data:
                 scores = calculate_all_scores(data, interval)
+                
+                # Calculate master score for this specific interval
+                interval_master_score = calculate_master_score_for_interval(scores)
+                scores['master_score'] = interval_master_score # Add master_score to interval's scores
+                
                 interval_scores[interval] = scores
-                
-                print(f"  ✅ {interval}: Score = {scores['total_score']:.1f} | S/R = {scores['support']:.2f} / {scores['resistance']:.2f}")
+                print(f"  ✅ {interval}: Total Score = {scores['total_score']:.1f}, Master Score = {interval_master_score:.2f}")
+    
+    if not interval_scores:
+        print("  ⚠️  No interval data available")
+        return
+    
+    # Calculate weighted indicators (for overall master score and classification)
+    weighted_indicators = calculate_weighted_indicators(interval_scores, settings['timeframeWeights'])
+    
+    # Calculate overall Master Score and Classification
+    overall_master_score, classification = calculate_master_score(weighted_indicators)
+    
+    print(f"\n  🎯 Overall Master Score: {overall_master_score:.2f} ({classification})")
+    print(f"  📊 Weighted RSI: {weighted_indicators['rsi']:.1f}")
+    print(f"  📊 Weighted MACD: {weighted_indicators['macd']:.1f}")
+    print(f"  📊 Weighted ADX: {weighted_indicators['adx']:.1f}")
+    print(f"  📊 Weighted Supertrend: {weighted_indicators['supertrend']:.1f}")
+    
+    # Retrieve master score history for SMA calculation for each interval
+    # This will be a dictionary where keys are intervals and values are lists of master scores
+    interval_master_score_histories = {interval: [] for interval in settings['intervals']}
+    
+    # Fetch enough history for SMA 21 for all intervals
+    # Use historical_limit if provided, otherwise use default 50
+    score_history_limit = historical_limit if historical_limit else 50
+    all_scores_history = get_latest_scores(symbol, limit=score_history_limit) 
 
-    if interval_scores:
-        weights = settings['timeframeWeights']
-        weighted_total = 0
-        total_weight = 0
+    for score_entry in all_scores_history:
+        for interval_key, interval_data in score_entry['intervals'].items():
+            if 'master_score' in interval_data:
+                interval_master_score_histories[interval_key].append(interval_data['master_score'])
+
+    # Calculate SMAs for each interval's master score
+    interval_smas = {}
+    for interval, history in interval_master_score_histories.items():
+        sma9_list = calculate_sma(history, 9)
+        sma21_list = calculate_sma(history, 21)
         
-        for interval, scores in interval_scores.items():
-            weight = weights.get(interval, 0)
-            weighted_total += scores['total_score'] * weight
-            total_weight += weight
-        
-        final_score = weighted_total / total_weight if total_weight > 0 else 0
-        
-        scores_data = {
-            'timestamp': current_timestamp,
-            'weighted_total_score': round(final_score, 2),
-            'intervals': {}
+        interval_smas[interval] = {
+            'master_score_sma9': sma9_list[-1] if sma9_list else None,
+            'master_score_sma21': sma21_list[-1] if sma21_list else None
         }
-        
-        for interval, scores in interval_scores.items():
-            scores_data['intervals'][interval] = {
-                'total_score': scores['total_score'],
-                'support': scores['support'],
-                'resistance': scores['resistance'],
-                'rsi_score': scores.get('rsi_score', 0),
-                'rsi_value': scores.get('rsi_value', 50),
-                'macd_score': scores.get('macd_score', 0),
-                'adx_score': scores.get('adx_score', 0),
-                'bb_score': scores.get('bb_score', 0),
-                'sma_score': scores.get('sma_score', 0),
-                'supertrend_score': scores.get('supertrend_score', 0),
-                'current_price': scores.get('current_price', 0)
-            }
-        
-        save_indicator_scores(symbol, scores_data)
-        
-        # Get score history for SMA calculation
-        score_history = get_latest_scores(symbol, limit=100)
-        
-        # Calculate SMAs on weighted scores
-        sma_config = settings.get('score_sma', {'fast_period': 9, 'slow_period': 11})
-        fast_period = sma_config['fast_period']
-        slow_period = sma_config['slow_period']
-        
-        if len(score_history) >= max(fast_period, slow_period):
-            scores_list = [s['weighted_total_score'] for s in score_history]
-            fast_sma = calculate_sma_on_scores(scores_list, fast_period)
-            slow_sma = calculate_sma_on_scores(scores_list, slow_period)
-            
-            print(f"  📈 SMA-{fast_period}: {fast_sma:.2f} | SMA-{slow_period}: {slow_sma:.2f}")
-            
-            # Add SMAs to data for frontend
-            scores_data['sma_fast'] = fast_sma
-            scores_data['sma_slow'] = slow_sma
-            scores_data['sma_fast_period'] = fast_period
-            scores_data['sma_slow_period'] = slow_period
-        
-        # Check for crossover alerts
-        check_sma_crossover_alerts(symbol, score_history)
-        
-        # Check other alerts
-        check_breakout_rules(symbol, scores_data)
-        
-        # Emit to WebSocket
-        socketio.emit('score_update', {
-            'symbol': symbol,
-            'timestamp': current_timestamp,
-            'weighted_total_score': final_score,
-            'current_price': current_price,
-            'intervals': scores_data['intervals'],
-            'sma_fast': scores_data.get('sma_fast'),
-            'sma_slow': scores_data.get('sma_slow'),
-            'sma_fast_period': scores_data.get('sma_fast_period'),
-            'sma_slow_period': scores_data.get('sma_slow_period')
-        })
-        
-        print(f"\n  🎯 Final Weighted Score: {final_score:.2f}")
-        print(f"  💾 Saved to database: db/{symbol}.sqlite")
 
-def check_and_repopulate_database():
-    """Check if the database is empty and prompt the user to repopulate it."""
-    print(f"\n{'='*60}")
-    print("🕵️  Checking database integrity...")
-    print(f"{'='*60}")
-
-    for symbol in settings['symbols']:
-        db_path = get_db_path(symbol)
-        db_is_empty = not os.path.exists(db_path)
-
-        if not db_is_empty:
-            try:
-                conn = sqlite3.connect(db_path)
-                cursor = conn.cursor()
-                
-                # Check if the main candle table has data
-                main_interval = settings['intervals'][0]
-                safe_interval = sanitize_interval(main_interval)
-                cursor.execute(f"SELECT COUNT(*) FROM candles_{safe_interval}")
-                count = cursor.fetchone()[0]
-                conn.close()
-                
-                if count == 0:
-                    db_is_empty = True
-            except Exception as e:
-                print(f"  ⚠️  Could not check DB for {symbol}, assuming it's empty. Error: {e}")
-                db_is_empty = True
-
-        if db_is_empty:
-            print(f"\n❓ Database for {symbol} is empty or corrupted.")
-            answer = input(f"   Do you want to fetch historical data and calculate indicators for {symbol}? (y/n): ").lower()
-            
-            if answer == 'y':
-                print(f"\n⏳ Repopulating data for {symbol}, please wait...")
-                update_symbol_data(symbol)
-                print(f"\n✅ Data repopulation for {symbol} complete.")
-            else:
-                print(f"\nSkipping repopulation for {symbol}.")
-
-def check_breakout_rules(symbol, scores_data):
-    """Check if scores trigger any alerts"""
-    global last_alert_time
-    
-    if not settings['notifications']['enabled']:
-        return
-    
-    rules = settings['breakout_rules']
-    total_score = scores_data['weighted_total_score']
-    
-    rsi = 50
-    for interval in ['1h', '15m', '5m', '1m', '1d']:
-        interval_data = scores_data['intervals'].get(interval, {})
-        if 'rsi_value' in interval_data:
-            rsi = interval_data['rsi_value']
-            break
-    
-    current_time = time.time()
-    cooldown = 300
-    
-    alerts = []
-    
-    if total_score > rules['total_score_threshold']:
-        alert_key = f"{symbol}_buy"
-        if alert_key not in last_alert_time or (current_time - last_alert_time[alert_key]) > cooldown:
-            alerts.append({
-                'type': 'STRONG_BUY',
-                'message': f"🚀 {symbol} STRONG BUY Signal!\nTotal Score: {total_score:.1f}\nRSI: {rsi:.1f}"
-            })
-            last_alert_time[alert_key] = current_time
-    
-    elif total_score < -rules['total_score_threshold']:
-        alert_key = f"{symbol}_sell"
-        if alert_key not in last_alert_time or (current_time - last_alert_time[alert_key]) > cooldown:
-            alerts.append({
-                'type': 'STRONG_SELL',
-                'message': f"⚠️ {symbol} STRONG SELL Signal!\nTotal Score: {total_score:.1f}\nRSI: {rsi:.1f}"
-            })
-            last_alert_time[alert_key] = current_time
-    
-    if rsi > rules['rsi_overbought']:
-        alert_key = f"{symbol}_overbought"
-        if alert_key not in last_alert_time or (current_time - last_alert_time[alert_key]) > cooldown:
-            alerts.append({
-                'type': 'OVERBOUGHT',
-                'message': f"📈 {symbol} RSI Overbought!\nRSI: {rsi:.1f}\nTotal Score: {total_score:.1f}"
-            })
-            last_alert_time[alert_key] = current_time
-    
-    elif rsi < rules['rsi_oversold']:
-        alert_key = f"{symbol}_oversold"
-        if alert_key not in last_alert_time or (current_time - last_alert_time[alert_key]) > cooldown:
-            alerts.append({
-                'type': 'OVERSOLD',
-                'message': f"📉 {symbol} RSI Oversold!\nRSI: {rsi:.1f}\nTotal Score: {total_score:.1f}"
-            })
-            last_alert_time[alert_key] = current_time
-    
-    for alert in alerts:
-        send_notification(alert['message'], settings)
-        socketio.emit('alert', {
-            'symbol': symbol,
-            'type': alert['type'],
-            'message': alert['message'],
-            'timestamp': int(time.time())
-        })
-        print(f"🔔 Alert: {alert['type']} for {symbol}")
-
-def check_sma_crossover_alerts(symbol, score_history):
-    """Check for SMA crossover and send alerts"""
-    global last_alert_time, last_crossover_state
-    
-    if not settings['notifications']['enabled']:
-        return
-    
-    # Get SMA periods from settings
-    sma_config = settings.get('score_sma', {'fast_period': 9, 'slow_period': 11})
-    fast_period = sma_config['fast_period']
-    slow_period = sma_config['slow_period']
-    
-    # Detect crossover
-    crossover_signal = detect_sma_crossover(score_history, fast_period, slow_period)
-    
-    if crossover_signal is None:
-        return
-    
-    # Check if this is a new crossover (different from last state)
-    crossover_key = f"{symbol}_sma_crossover"
-    if last_crossover_state.get(crossover_key) == crossover_signal:
-        return  # Same signal, don't alert again
-    
-    # Check cooldown
-    current_time = time.time()
-    cooldown = 300
-    
-    alert_key = f"{symbol}_crossover_{crossover_signal.lower()}"
-    if alert_key in last_alert_time and (current_time - last_alert_time[alert_key]) < cooldown:
-        return
-    
-    # Update state
-    last_crossover_state[crossover_key] = crossover_signal
-    last_alert_time[alert_key] = current_time
-    
-    # Get current score and SMAs
-    latest_score = score_history[-1]['weighted_total_score']
-    scores = [s['weighted_total_score'] for s in score_history]
-    fast_sma = calculate_sma_on_scores(scores, fast_period)
-    slow_sma = calculate_sma_on_scores(scores, slow_period)
-    
-    # Create alert
-    alert = {
-        'type': f'SMA_CROSSOVER_{crossover_signal}',
-        'message': f"{'🟢' if crossover_signal == 'BUY' else '🔴'} {symbol} SMA Crossover {crossover_signal}!\n"
-                   f"Score: {latest_score:.1f}\n"
-                   f"SMA-{fast_period}: {fast_sma:.1f} | SMA-{slow_period}: {slow_sma:.1f}"
+    # Prepare data for saving and emitting
+    scores_to_save = {
+        'timestamp': current_timestamp,
+        'master_score': overall_master_score, # This is the overall master score
+        'classification': classification,
+        'weighted_indicators': weighted_indicators,
+        'intervals': interval_scores, # This now contains interval-specific master_score
+        'interval_smas': interval_smas # Add this
     }
     
-    send_notification(alert['message'], settings)
-    socketio.emit('alert', {
+    # Save scores to database
+    save_indicator_scores(symbol, scores_to_save)
+
+    # Emit to frontend
+    socketio.emit('score_update', {
         'symbol': symbol,
-        'type': alert['type'],
-        'message': alert['message'],
+        'timestamp': current_timestamp,
+        'master_score': overall_master_score, # Overall master score
+        'classification': classification,
+        'weighted_indicators': weighted_indicators,
+        'current_price': current_price,
+        'intervals': interval_scores, # Contains interval-specific master_score
+        'interval_smas': interval_smas # New: interval-specific SMAs
+    })
+    
+    # Update ADX history for breakout detection
+    if symbol not in adx_history:
+        adx_history[symbol] = []
+    adx_history[symbol].append(weighted_indicators['adx'])
+    adx_history[symbol] = adx_history[symbol][-10:]  # Keep last 10
+    
+    # ============================================
+    # TRADING LOGIC
+    # ============================================
+    process_trading_signals(symbol, overall_master_score, weighted_indicators, 
+                           interval_scores, current_price)
+
+def process_trading_signals(symbol, master_score, weighted_indicators, 
+                           interval_scores, current_price):
+    """Process trading signals and manage positions"""
+    
+    # Check risk management limits
+    if not check_risk_limits(symbol):
+        return
+    
+    # Get required data for signal detection
+    weighted_rsi = weighted_indicators['rsi']
+    weighted_macd = weighted_indicators['macd']
+    weighted_adx = weighted_indicators['adx']
+    weighted_supertrend = weighted_indicators['supertrend']
+    
+    # Get 1h interval data for S/R and other calculations
+    interval_1h = interval_scores.get('1h', {})
+    support = interval_1h.get('support', current_price * 0.98)
+    resistance = interval_1h.get('resistance', current_price * 1.02)
+    rsi_extreme = interval_1h.get('rsi_extreme', False)
+    high_volume = interval_1h.get('high_volume', False)
+    atr = interval_1h.get('atr', 0)
+    avg_atr_20 = interval_1h.get('avg_atr_20', 0)
+    swing_low = interval_1h.get('swing_low', current_price * 0.95)
+    swing_high = interval_1h.get('swing_high', current_price * 1.05)
+    
+    # Check market filters
+    can_trade, filter_reason = trading_engine.check_market_filters(
+        weighted_adx, atr, avg_atr_20
+    )
+    
+    if not can_trade:
+        print(f"  🚫 Market filter: {filter_reason}")
+        return
+    
+    # Check existing positions and manage exits
+    open_positions = position_manager.get_open_positions(symbol)
+    
+    for position in open_positions:
+        # Check exit conditions
+        should_exit, exit_reason = trading_engine.check_exit_conditions(
+            position, current_price, master_score, weighted_supertrend,
+            position['entry_time']
+        )
+        
+        if should_exit:
+            # Close position
+            trade = position_manager.close_position(
+                position['id'], current_price, exit_reason
+            )
+            
+            if trade:
+                # Send exit notification
+                message = format_exit_signal(
+                    trade['direction'], symbol, exit_reason,
+                    trade['entry_price'], trade['exit_price'],
+                    trade['pnl'], trade['pnl_percent']
+                )
+                send_notification(message, settings)
+                
+                socketio.emit('trade_closed', {
+                    'symbol': symbol,
+                    'trade': trade,
+                    'timestamp': int(time.time())
+                })
+        else:
+            # Check trailing stop
+            new_sl = trading_engine.update_trailing_stop(position, current_price)
+            if new_sl:
+                old_sl = position['stop_loss']
+                position_manager.update_stop_loss(position['id'], new_sl)
+                
+                # Send trailing stop notification
+                message = format_trailing_stop_update(
+                    symbol, position['direction'], old_sl, new_sl, current_price
+                )
+                send_notification(message, settings)
+    
+    # Don't look for new entries if position exists
+    if len(open_positions) > 0:
+        return
+    
+    # Check cooldown
+    if not trading_engine.check_cooldown(symbol):
+        print(f"  ⏱️  Cooldown active for {symbol}")
+        return
+    
+    # ============================================
+    # SIGNAL DETECTION
+    # ============================================
+    
+    # Detect reversal setup
+    is_reversal, reversal_direction = trading_engine.detect_reversal_setup(
+        master_score, weighted_rsi, rsi_extreme, current_price,
+        support, resistance, weighted_adx
+    )
+    
+    if is_reversal:
+        print(f"  🔔 Reversal Setup Detected: {reversal_direction}")
+        
+        # Log setup
+        position_manager.log_signal(
+            symbol, 'REVERSAL_SETUP', reversal_direction, master_score,
+            {'support': support, 'resistance': resistance, 'rsi': weighted_rsi}
+        )
+        
+        # Send setup alert
+        message = format_setup_alert(
+            symbol, reversal_direction, 'Reversal', master_score,
+            'Waiting for confirmation'
+        )
+        send_notification(message, settings)
+    
+    # Detect breakout setup
+    is_breakout, breakout_direction = trading_engine.detect_breakout_setup(
+        master_score, weighted_rsi, current_price, support, resistance,
+        weighted_adx, adx_history.get(symbol, [])
+    )
+    
+    if is_breakout:
+        print(f"  🔔 Breakout Setup Detected: {breakout_direction}")
+        
+        # Log setup
+        position_manager.log_signal(
+            symbol, 'BREAKOUT_SETUP', breakout_direction, master_score,
+            {'support': support, 'resistance': resistance}
+        )
+        
+        # Send setup alert
+        message = format_setup_alert(
+            symbol, breakout_direction, 'Breakout', master_score,
+            'Waiting for breakout confirmation'
+        )
+        send_notification(message, settings)
+    
+    # ============================================
+    # ENTRY SIGNALS
+    # ============================================
+    
+    # Collect supertrend scores for all timeframes
+    supertrend_scores = {
+        interval: scores.get('supertrend_score', 50)
+        for interval, scores in interval_scores.items()
+    }
+    
+    # Check LONG ENTRY - Breakout
+    should_enter_long_breakout, reason = trading_engine.check_long_entry_breakout(
+        master_score, supertrend_scores, current_price, resistance, high_volume
+    )
+    
+    if should_enter_long_breakout:
+        execute_entry_signal(
+            symbol, 'LONG', 'Breakout', current_price, master_score,
+            weighted_rsi, swing_low, swing_high, atr, interval_1h
+        )
+        return
+    
+    # Check LONG ENTRY - Reversal
+    should_enter_long_reversal, reason = trading_engine.check_long_entry_reversal(
+        reversal_direction if is_reversal else None, master_score,
+        weighted_macd, current_price, support
+    )
+    
+    if should_enter_long_reversal:
+        execute_entry_signal(
+            symbol, 'LONG', 'Reversal', current_price, master_score,
+            weighted_rsi, swing_low, swing_high, atr, interval_1h
+        )
+        return
+    
+    # Check SHORT ENTRY - Breakout
+    should_enter_short_breakout, reason = trading_engine.check_short_entry_breakout(
+        master_score, supertrend_scores, current_price, support, high_volume
+    )
+    
+    if should_enter_short_breakout:
+        execute_entry_signal(
+            symbol, 'SHORT', 'Breakout', current_price, master_score,
+            weighted_rsi, swing_low, swing_high, atr, interval_1h
+        )
+        return
+    
+    # Check SHORT ENTRY - Reversal
+    should_enter_short_reversal, reason = trading_engine.check_short_entry_reversal(
+        reversal_direction if is_reversal else None, master_score,
+        weighted_macd, current_price, resistance
+    )
+    
+    if should_enter_short_reversal:
+        execute_entry_signal(
+            symbol, 'SHORT', 'Reversal', current_price, master_score,
+            weighted_rsi, swing_low, swing_high, atr, interval_1h
+        )
+        return
+
+def execute_entry_signal(symbol, direction, setup_type, entry_price, master_score,
+                        weighted_rsi, swing_low, swing_high, atr, interval_1h):
+    """Execute entry signal and open position"""
+    
+    print(f"\n  🚀 ENTRY SIGNAL: {direction} {setup_type}")
+    
+    # Get supertrend value from 1h for stop loss
+    supertrend_1h = interval_1h.get('supertrend_score', 50)
+    
+    # Calculate stop loss
+    stop_loss = trading_engine.calculate_stop_loss(
+        direction, entry_price, swing_low, swing_high, atr, supertrend_1h
+    )
+    
+    # Calculate target (1:2 R:R)
+    target = trading_engine.calculate_target_price(direction, entry_price, stop_loss)
+    
+    # Calculate position size
+    position_size = trading_engine.calculate_position_size(
+        ACCOUNT_BALANCE, entry_price, stop_loss
+    )
+    
+    print(f"  💰 Entry: ${entry_price:.2f}")
+    print(f"  🛑 Stop Loss: ${stop_loss:.2f}")
+    print(f"  🎯 Target: ${target:.2f}")
+    print(f"  📊 Position Size: {position_size:.4f}")
+    
+    # Open position
+    position_id = position_manager.open_position(
+        symbol, direction, entry_price, stop_loss, target,
+        position_size, setup_type
+    )
+    
+    # Update last trade time
+    trading_engine.last_trade_time[symbol] = time.time()
+    
+    # Send entry notification
+    if direction == 'LONG':
+        message = format_long_entry_signal(
+            symbol, setup_type, entry_price, stop_loss, target,
+            master_score, weighted_rsi
+        )
+    else:
+        message = format_short_entry_signal(
+            symbol, setup_type, entry_price, stop_loss, target,
+            master_score, weighted_rsi
+        )
+    
+    send_notification(message, settings)
+    
+    # Emit to frontend
+    socketio.emit('position_opened', {
+        'symbol': symbol,
+        'direction': direction,
+        'setup_type': setup_type,
+        'entry_price': entry_price,
+        'stop_loss': stop_loss,
+        'target': target,
+        'position_size': position_size,
+        'master_score': master_score,
         'timestamp': int(time.time())
     })
-    print(f"🔔 SMA Crossover Alert: {crossover_signal} for {symbol}")
+
+def check_risk_limits(symbol):
+    """Check all risk management limits"""
+    
+    # Check daily loss limit
+    limit_reached, daily_pnl = position_manager.check_daily_loss_limit(
+        ACCOUNT_BALANCE, limit_percent=4
+    )
+    
+    if limit_reached:
+        print(f"  🛑 Daily loss limit reached: ${daily_pnl:.2f}")
+        message = format_risk_warning('DAILY_LOSS_LIMIT', {
+            'daily_pnl': daily_pnl,
+            'limit_percent': 4
+        })
+        send_notification(message, settings)
+        return False
+    
+    # Check max concurrent positions
+    open_positions = position_manager.count_open_positions()
+    if open_positions >= 3:
+        print(f"  🛑 Max positions reached: {open_positions}/3")
+        return False
+    
+    # Check trades per hour limit
+    trades_last_hour = position_manager.count_trades_last_hour()
+    if trades_last_hour >= 2:
+        print(f"  🛑 Hourly trade limit reached: {trades_last_hour}/2")
+        return False
+    
+    return True
 
 def background_worker():
-    """Fetch data, calculate scores, SMAs, and store in database"""
+    """Fetch data, calculate scores, and detect signals"""
+    
+    # Initial data load if no scores exist
+    print(f"\n{'='*60}")
+    print("Checking for initial data load...")
+    print(f"{'='*60}")
+    initial_load_needed = False
+    for symbol in settings['symbols']:
+        latest_score = get_latest_score(symbol)
+        if latest_score is None:
+            print(f"  ⚠️  No existing scores found for {symbol}. Performing initial data load...")
+            # Fetch more historical data for initial load (e.g., 200 candles for each interval)
+            update_symbol_data(symbol, historical_limit=200) 
+            initial_load_needed = True
+        else:
+            print(f"  ✅ Existing scores found for {symbol}.")
+    
+    if initial_load_needed:
+        print(f"\n{'='*60}")
+        print("Initial data load complete. Starting live updates.")
+        print(f"{'='*60}")
+
     while True:
         try:
             update_interval = settings['updateIntervalMinutes'] * 60
@@ -370,7 +535,7 @@ def background_worker():
             for symbol in settings['symbols']:
                 update_symbol_data(symbol)
             
-            print("\n✅ Background worker finished update cycle for all symbols.")
+            print("\n✅ Background worker finished update cycle")
         except Exception as e:
             print(f"❌ Error in background worker: {e}")
             import traceback
@@ -391,52 +556,30 @@ def get_symbols():
 def get_settings():
     return jsonify(settings)
 
-@app.route('/api/candles/<symbol>/<interval>')
-def get_candles_api(symbol, interval):
-    limit = int(request.args.get('limit', 100))
-    candles = get_candles(symbol, interval, limit)
-    return jsonify(candles)
+@app.route('/api/positions')
+def get_positions():
+    positions = position_manager.get_open_positions()
+    return jsonify(positions)
 
-@app.route('/api/scores/<symbol>')
-def get_scores_api(symbol):
-    score = get_latest_score(symbol)
-    return jsonify(score if score else {})
+@app.route('/api/trades')
+def get_trades():
+    limit = int(request.args.get('limit', 20))
+    trades = position_manager.get_recent_trades(limit)
+    return jsonify(trades)
 
-@app.route('/api/scores/<symbol>/history')
-def get_scores_history_api(symbol):
-    limit = int(request.args.get('limit', 100))
-    scores = get_latest_scores(symbol, limit)
-    return jsonify(scores)
-
-@app.route('/api/scores/<symbol>/all_intervals')
-def get_all_intervals_scores_api(symbol):
-    """
-    New endpoint to get the latest score breakdown for all intervals.
-    This is for the new Indicators Dashboard page.
-    """
-    score = get_latest_score(symbol)
-    if score and 'intervals' in score:
-        return jsonify(score['intervals'])
-    return jsonify({})
+@app.route('/api/stats')
+def get_stats():
+    stats = position_manager.get_trading_stats()
+    daily_pnl = position_manager.get_daily_pnl()
+    return jsonify({
+        'stats': stats,
+        'daily_pnl': daily_pnl,
+        'account_balance': ACCOUNT_BALANCE
+    })
 
 @app.route('/api/health')
 def health_check():
     return jsonify({"status": "ok", "timestamp": datetime.now().isoformat()})
-
-@app.route('/api/scores/<symbol>/<interval>/history')
-def get_indicator_scores_history_api(symbol, interval):
-    print(f"Fetching indicator scores history for {symbol} and {interval}") # DEBUG LOG
-    limit = int(request.args.get('limit', 100))
-    scores = get_indicator_scores_history(symbol, interval, limit)
-    return jsonify(scores)
-
-@app.route('/api/repopulate', methods=['POST'])
-def repopulate_data():
-    """Endpoint to trigger data repopulation."""
-    for symbol in settings['symbols']:
-        print(f"Repopulating data for {symbol}...")
-        update_symbol_data(symbol)
-    return jsonify({"status": "repopulation_started"})
 
 # ============================================
 # WebSocket Events
@@ -445,15 +588,6 @@ def repopulate_data():
 @socketio.on('connect')
 def handle_connect():
     print('🔌 Client connected')
-    for symbol in settings['symbols']:
-        score = get_latest_score(symbol)
-        if score:
-            emit('score_update', {
-                'symbol': symbol,
-                'timestamp': score['timestamp'],
-                'weighted_total_score': score['weighted_total_score'],
-                'intervals': score['intervals']
-            })
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -464,9 +598,6 @@ def handle_disconnect():
 # ============================================
 
 if __name__ == '__main__':
-    # Check and repopulate database if necessary
-    check_and_repopulate_database()
-
     worker = threading.Thread(target=background_worker, daemon=True)
     worker.start()
     
@@ -474,14 +605,13 @@ if __name__ == '__main__':
     port = settings['api_server']['port']
     
     print(f"\n{'='*60}")
-    print(f"🚀 Live Analyser Backend Started")
+    print(f"🚀 Live Analyser Trading Bot Started")
     print(f"{'='*60}")
-    print(f"📁 Config File: {config_file}")
+    print(f"📁 Config: {config_file}")
     print(f"🔡 Server: http://{host}:{port}")
     print(f"📊 Symbols: {', '.join(settings['symbols'])}")
-    print(f"⏱️  Update Interval: {settings['updateIntervalMinutes']} minutes")
-    print(f"🔔 Notifications: {'Enabled' if settings['notifications']['enabled'] else 'Disabled'}")
-    print(f"💾 Database: db/{{symbol}}.sqlite")
+    print(f"💰 Account: ${ACCOUNT_BALANCE:,.2f}")
+    print(f"⏱️  Update: {settings['updateIntervalMinutes']} minutes")
     print(f"{'='*60}\n")
     
     socketio.run(app, host=host, port=port, debug=False, allow_unsafe_werkzeug=True)

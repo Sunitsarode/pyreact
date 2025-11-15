@@ -1,90 +1,139 @@
 # ============================================
 # backend/indicators.py
-# Enhanced with Support/Resistance + SMA on Score
+# Updated with 0-100 Scoring System
 # ============================================
 import pandas as pd
 import pandas_ta as pta
 import numpy as np
 
 def calculate_rsi_score(close_prices):
-    """Calculate RSI score (-100 to +100)"""
+    """
+    Calculate RSI score (0-100)
+    If RSI > 50: Score = RSI
+    If RSI ≤ 50: Score = RSI
+    Returns: (score, rsi_value, is_extreme)
+    """
     rsi = pta.rsi(close_prices, length=14)
     if rsi is None or rsi.empty:
-        return 0, None
+        return 0, 50, False
     
     latest_rsi = rsi.iloc[-1]
-    score = (latest_rsi - 50) * 2
-    return round(score, 2), round(latest_rsi, 2)
+    score = latest_rsi  # Direct RSI value as score (0-100)
+    
+    # Check extreme zones
+    is_extreme = latest_rsi > 70 or latest_rsi < 30
+    
+    return round(score, 2), round(latest_rsi, 2), is_extreme
 
 def calculate_macd_score(close_prices):
-    """Calculate MACD score (-100 to +100)"""
-    macd = pta.macd(close_prices)
+    """
+    Calculate MACD score (0-100)
+    Score = 50 + (Histogram × 5)
+    Capped between 0 and 100
+    """
+    macd = pta.macd(close_prices, fast=12, slow=26, signal=9)
     if macd is None or macd.empty:
-        return 0
+        return 50
     
     macd_line = macd.iloc[-1, 0]
     signal_line = macd.iloc[-1, 1]
-    diff = macd_line - signal_line
+    histogram = macd_line - signal_line
     
-    return round(max(-100, min(100, diff * 10)), 2)
+    # Score formula
+    score = 50 + (histogram * 5)
+    score = max(0, min(100, score))  # Cap between 0-100
+    
+    return round(score, 2)
 
 def calculate_adx_score(high, low, close):
-    """Calculate ADX trend strength score"""
+    """
+    Calculate ADX strength score (0-100)
+    If +DI > -DI: Bullish → Score = ADX value
+    If -DI > +DI: Bearish → Score = 100 - ADX value
+    """
     df = pd.DataFrame({'high': high, 'low': low, 'close': close})
     adx = pta.adx(df['high'], df['low'], df['close'], length=14)
     
     if adx is None or adx.empty:
-        return 0
+        return 50
     
-    adx_val = adx.iloc[-1, 0]
-    dmp = adx.iloc[-1, 1]
-    dmn = adx.iloc[-1, 2]
+    adx_val = adx.iloc[-1, 0]  # ADX value
+    dmp = adx.iloc[-1, 1]      # +DI
+    dmn = adx.iloc[-1, 2]      # -DI
     
-    if adx_val < 25:
-        return 0
+    # Direction-based scoring
+    if dmp > dmn:
+        # Bullish
+        score = adx_val
+    else:
+        # Bearish
+        score = 100 - adx_val
     
-    strength = min(100, (adx_val - 25) * 4)
-    return round(strength if dmp > dmn else -strength, 2)
-
-def calculate_bb_score(close_prices, current_price):
-    """Calculate Bollinger Bands position score"""
-    bb = pta.bbands(close_prices, length=20, std=2)
-    if bb is None or bb.empty:
-        return 0
-    
-    upper = bb.iloc[-1, 0]
-    middle = bb.iloc[-1, 1]
-    lower = bb.iloc[-1, 2]
-    
-    bb_range = upper - lower
-    if bb_range == 0:
-        return 0
-    
-    position = current_price - middle
-    score = (position / bb_range) * 200
-    return round(max(-100, min(100, score)), 2)
-
-def calculate_sma_score(close_prices, current_price):
-    """Calculate SMA trend score"""
-    sma_21 = pta.sma(close_prices, length=21)
-    if sma_21 is None or sma_21.empty:
-        return 0
-    
-    sma_val = sma_21.iloc[-1]
-    if sma_val == 0:
-        return 0
-    
-    percent_diff = ((current_price - sma_val) / sma_val) * 100
-    return round(max(-100, min(100, percent_diff * 10)), 2)
+    return round(score, 2)
 
 def calculate_supertrend_score(high, low, close):
-    """Calculate Supertrend score"""
-    supertrend = pta.supertrend(high=high, low=low, close=close, length=7, multiplier=3)
-    if supertrend is None or supertrend.empty:
-        return 0
+    """
+    Calculate Supertrend score (0-100)
+    Calculate two Supertrends: (7,3) and (11,2)
+    Both Uptrend = 100
+    Both Downtrend = 0
+    Mixed = 50
+    """
+    st1 = pta.supertrend(high=high, low=low, close=close, length=7, multiplier=3)
+    st2 = pta.supertrend(high=high, low=low, close=close, length=11, multiplier=2)
     
-    direction = supertrend.iloc[-1, 1]
-    return 100 if direction == 1 else -100 if direction == -1 else 0
+    if st1 is None or st1.empty or st2 is None or st2.empty:
+        return 50
+    
+    # Get direction (1 = uptrend, -1 = downtrend)
+    direction1 = st1.iloc[-1, 1]
+    direction2 = st2.iloc[-1, 1]
+    
+    # Scoring logic
+    if direction1 == 1 and direction2 == 1:
+        score = 100  # Both uptrend
+    elif direction1 == -1 and direction2 == -1:
+        score = 0    # Both downtrend
+    else:
+        score = 50   # Mixed
+    
+    return round(score, 2)
+
+def calculate_volume_analysis(volume):
+    """
+    Calculate average volume and check if current volume is elevated
+    Returns: (avg_volume, volume_ratio, is_high_volume)
+    """
+    if len(volume) < 20:
+        return 0, 0, False
+    
+    avg_volume = pd.Series(volume).tail(20).mean()
+    current_volume = volume[-1]
+    volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
+    is_high_volume = volume_ratio > 1.5
+    
+    return round(avg_volume, 2), round(volume_ratio, 2), is_high_volume
+
+def calculate_atr(high, low, close, period=14):
+    """
+    Calculate Average True Range (ATR)
+    Returns: current_atr, avg_atr_20day
+    """
+    df = pd.DataFrame({'high': high, 'low': low, 'close': close})
+    atr = pta.atr(df['high'], df['low'], df['close'], length=period)
+    
+    if atr is None or atr.empty:
+        return 0, 0
+    
+    current_atr = atr.iloc[-1]
+    
+    # Calculate 20-day average ATR for volatility filter
+    if len(atr) >= 20:
+        avg_atr_20 = atr.tail(20).mean()
+    else:
+        avg_atr_20 = current_atr
+    
+    return round(current_atr, 4), round(avg_atr_20, 4)
 
 def calculate_support_resistance(high, low, close, lookback=20):
     """
@@ -127,98 +176,153 @@ def calculate_support_resistance(high, low, close, lookback=20):
         current = close.iloc[-1] if len(close) > 0 else 0
         return current * 0.98, current * 1.02
 
+def calculate_swing_levels(high, low, lookback=10):
+    """
+    Calculate swing high and swing low for stop-loss placement
+    Returns: (swing_low, swing_high)
+    """
+    recent_high = pd.Series(high).tail(lookback)
+    recent_low = pd.Series(low).tail(lookback)
+    
+    swing_low = recent_low.min()
+    swing_high = recent_high.max()
+    
+    return round(swing_low, 2), round(swing_high, 2)
+
 def calculate_all_scores(data, interval):
     """
-    Calculate all indicator scores for a given interval
-    Returns dict with scores and support/resistance levels
+    Calculate all indicator scores for a given interval (0-100 scale)
+    Returns dict with scores and analysis
     """
     close = pd.Series(data['close'])
     high = pd.Series(data['high'])
     low = pd.Series(data['low'])
+    volume = data['volume']
     current_price = data['close'][-1]
     
-    rsi_score, rsi_value = calculate_rsi_score(close)
+    # Calculate scores (0-100)
+    rsi_score, rsi_value, rsi_extreme = calculate_rsi_score(close)
     macd_score = calculate_macd_score(close)
     adx_score = calculate_adx_score(high, low, close)
-    bb_score = calculate_bb_score(close, current_price)
-    sma_score = calculate_sma_score(close, current_price)
     supertrend_score = calculate_supertrend_score(high, low, close)
     
+    # Calculate support/resistance
     support, resistance = calculate_support_resistance(high, low, close)
+    
+    # Calculate volume analysis
+    avg_volume, volume_ratio, high_volume = calculate_volume_analysis(volume)
+    
+    # Calculate ATR
+    current_atr, avg_atr_20 = calculate_atr(high, low, close)
+    
+    # Calculate swing levels
+    swing_low, swing_high = calculate_swing_levels(high, low)
     
     scores = {
         'interval': interval,
         'rsi_score': rsi_score,
         'rsi_value': rsi_value,
+        'rsi_extreme': int(rsi_extreme),
         'macd_score': macd_score,
         'adx_score': adx_score,
-        'bb_score': bb_score,
-        'sma_score': sma_score,
         'supertrend_score': supertrend_score,
         'current_price': current_price,
         'support': support,
-        'resistance': resistance
+        'resistance': resistance,
+        'avg_volume': avg_volume,
+        'volume_ratio': volume_ratio,
+        'high_volume': int(high_volume),
+        'atr': current_atr,
+        'avg_atr_20': avg_atr_20,
+        'swing_low': swing_low,
+        'swing_high': swing_high
     }
     
-    score_values = [
-        rsi_score, macd_score, adx_score, 
-        bb_score, sma_score, supertrend_score
-    ]
-    
-    valid_scores = [s for s in score_values if s != 0]
-    interval_score = sum(valid_scores) / len(valid_scores) if valid_scores else 0
-    
+    # Calculate interval total score (average of all indicators)
+    interval_score = (rsi_score + macd_score + adx_score + supertrend_score) / 4
     scores['total_score'] = round(interval_score, 2)
     
     return scores
 
-def calculate_sma_on_scores(score_values, period):
+def calculate_master_score(weighted_scores):
     """
-    Calculate SMA on score values (not price)
-    score_values: list of score numbers
-    period: SMA period (e.g., 9, 11)
-    Returns: SMA value or None if not enough data
+    Calculate Master Score using indicator weights
+    MASTER_SCORE = (W_RSI × 0.25) + (W_MACD × 0.30) + (W_ADX × 0.20) + (W_Supertrend × 0.25)
+    
+    weighted_scores: dict with keys {rsi, macd, adx, supertrend}
+    Returns: master_score (0-100) and classification
     """
-    if len(score_values) < period:
-        return None
+    master_score = (
+        weighted_scores['rsi'] * 0.25 +
+        weighted_scores['macd'] * 0.30 +
+        weighted_scores['adx'] * 0.20 +
+        weighted_scores['supertrend'] * 0.25
+    )
     
-    scores_series = pd.Series(score_values)
-    sma = scores_series.rolling(window=period).mean()
+    # Classification
+    if master_score > 65:
+        classification = 'STRONG_BULLISH'
+    elif master_score >= 55:
+        classification = 'BULLISH'
+    elif master_score >= 45:
+        classification = 'NEUTRAL'
+    elif master_score >= 35:
+        classification = 'BEARISH'
+    else:
+        classification = 'STRONG_BEARISH'
     
-    if sma.empty or pd.isna(sma.iloc[-1]):
-        return None
-    
-    return round(sma.iloc[-1], 2)
+    return round(master_score, 2), classification
 
-def detect_sma_crossover(score_history, fast_period=9, slow_period=11):
+def calculate_master_score_for_interval(interval_scores_data):
     """
-    Detect SMA crossover on weighted score history
-    Returns: 'BUY', 'SELL', or None
+    Calculate Master Score for a single interval using indicator weights.
+    Assumes interval_scores_data contains 'rsi_score', 'macd_score', 'adx_score', 'supertrend_score'.
+    Returns: master_score (0-100)
     """
-    if len(score_history) < max(fast_period, slow_period) + 1:
-        return None
+    master_score = (
+        interval_scores_data['rsi_score'] * 0.25 +
+        interval_scores_data['macd_score'] * 0.30 +
+        interval_scores_data['adx_score'] * 0.20 +
+        interval_scores_data['supertrend_score'] * 0.25
+    )
+    return round(master_score, 2)
+
+def calculate_weighted_indicators(interval_scores, timeframe_weights):
+    """
+    Calculate weighted indicator scores across timeframes
+    Returns: dict with weighted {rsi, macd, adx, supertrend}
+    """
+    weighted = {
+        'rsi': 0,
+        'macd': 0,
+        'adx': 0,
+        'supertrend': 0
+    }
     
-    # Extract weighted scores
-    scores = [s.get('weighted_total_score', 0) for s in score_history]
+    total_weight = 0
     
-    # Calculate SMAs
-    fast_sma_current = calculate_sma_on_scores(scores, fast_period)
-    slow_sma_current = calculate_sma_on_scores(scores, slow_period)
+    for interval, scores in interval_scores.items():
+        weight = timeframe_weights.get(interval, 0)
+        weighted['rsi'] += scores['rsi_score'] * weight
+        weighted['macd'] += scores['macd_score'] * weight
+        weighted['adx'] += scores['adx_score'] * weight
+        weighted['supertrend'] += scores['supertrend_score'] * weight
+        total_weight += weight
     
-    # Calculate previous SMAs (1 candle back)
-    fast_sma_prev = calculate_sma_on_scores(scores[:-1], fast_period)
-    slow_sma_prev = calculate_sma_on_scores(scores[:-1], slow_period)
+    # Normalize
+    if total_weight > 0:
+        for key in weighted:
+            weighted[key] = round(weighted[key] / total_weight, 2)
     
-    if None in [fast_sma_current, slow_sma_current, fast_sma_prev, slow_sma_prev]:
-        return None
-    
-    # Detect crossover
-    # BUY: Fast crosses above Slow
-    if fast_sma_prev <= slow_sma_prev and fast_sma_current > slow_sma_current:
-        return 'BUY'
-    
-    # SELL: Fast crosses below Slow
-    if fast_sma_prev >= slow_sma_prev and fast_sma_current < slow_sma_current:
-        return 'SELL'
-    
-    return None
+    return weighted
+
+def calculate_sma(data, period):
+    """
+    Calculate Simple Moving Average (SMA) for a given data series and period.
+    Returns a list of SMA values.
+    """
+    if len(data) < period:
+        return [None] * len(data) # Not enough data to calculate SMA
+
+    sma_values = pd.Series(data).rolling(window=period).mean().tolist()
+    return [round(x, 2) if x is not None else None for x in sma_values]
