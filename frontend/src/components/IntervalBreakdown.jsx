@@ -4,22 +4,10 @@ export default function IntervalBreakdown({ intervals, weights }) {
     if (score < -30) return 'text-red-500';
     return 'text-blue-500';
   };
-  
-  const getBarColor = (score) => {
-    if (score > 30) return 'bg-green-500';
-    if (score < -30) return 'bg-red-500';
-    return 'bg-blue-500';
-  };
-  
-  const getBarWidth = (score) => {
-    return ((score + 100) / 200) * 100;
-  };
 
-  const intervalOrder = ['1d', '1h', '15m', '5m', '1m'];
+  const intervalOrder = ['1h', '5m', '1m']; // UPDATED: Only these 3
   const intervalNames = {
-    '1d': '1 Day',
     '1h': '1 Hour',
-    '15m': '15 Minutes',
     '5m': '5 Minutes',
     '1m': '1 Minute'
   };
@@ -34,6 +22,9 @@ export default function IntervalBreakdown({ intervals, weights }) {
             const data = intervals[interval];
             if (!data) return null;
 
+            // Use avg_total_score instead of total_score
+            const avgScore = data.avg_total_score || 0;
+
             return (
               <div key={interval} className="bg-gray-50 rounded-lg p-4">
                 <div className="flex justify-between items-center mb-2">
@@ -43,16 +34,19 @@ export default function IntervalBreakdown({ intervals, weights }) {
                       Weight: {((weights[interval] || 0) * 100).toFixed(0)}%
                     </span>
                   </div>
-                  <span className={`text-2xl font-bold ${getScoreColor(data.score)}`}>
-                    {data.score?.toFixed(1) || 0}
+                  <span className={`text-2xl font-bold ${getScoreColor(avgScore)}`}>
+                    {avgScore.toFixed(1)}
                   </span>
                 </div>
                 
                 {/* Progress Bar */}
                 <div className="w-full bg-gray-200 rounded-full h-4 mb-3">
                   <div 
-                    className={`h-4 rounded-full transition-all duration-300 ${getBarColor(data.score)}`}
-                    style={{ width: `${getBarWidth(data.score)}%` }}
+                    className={`h-4 rounded-full transition-all duration-300 ${
+                      avgScore > 30 ? 'bg-green-500' : 
+                      avgScore < -30 ? 'bg-red-500' : 'bg-blue-500'
+                    }`}
+                    style={{ width: `${((avgScore + 100) / 200) * 100}%` }}
                   ></div>
                 </div>
 
@@ -68,47 +62,33 @@ export default function IntervalBreakdown({ intervals, weights }) {
                   </div>
                 </div>
                 
-                {/* Individual Indicator Scores */}
-                {data.rsi_score !== undefined && (
-                  <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-xs">
-                    <div className="text-center">
-                      <p className="text-gray-500">RSI</p>
-                      <p className={`font-bold ${getScoreColor(data.rsi_score)}`}>
-                        {data.rsi_score?.toFixed(0)}
-                      </p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-gray-500">MACD</p>
-                      <p className={`font-bold ${getScoreColor(data.macd_score)}`}>
-                        {data.macd_score?.toFixed(0)}
-                      </p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-gray-500">ADX</p>
-                      <p className={`font-bold ${getScoreColor(data.adx_score)}`}>
-                        {data.adx_score?.toFixed(0)}
-                      </p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-gray-500">BB</p>
-                      <p className={`font-bold ${getScoreColor(data.bb_score)}`}>
-                        {data.bb_score?.toFixed(0)}
-                      </p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-gray-500">SMA</p>
-                      <p className={`font-bold ${getScoreColor(data.sma_score)}`}>
-                        {data.sma_score?.toFixed(0)}
-                      </p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-gray-500">ST</p>
-                      <p className={`font-bold ${getScoreColor(data.supertrend_score)}`}>
-                        {data.supertrend_score?.toFixed(0)}
-                      </p>
-                    </div>
+                {/* Individual Indicator Scores - ONLY 4 */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                  <div className="text-center">
+                    <p className="text-gray-500">RSI</p>
+                    <p className={`font-bold ${getScoreColor(data.rsi_score)}`}>
+                      {data.rsi_score?.toFixed(0) || 0}
+                    </p>
                   </div>
-                )}
+                  <div className="text-center">
+                    <p className="text-gray-500">MACD</p>
+                    <p className={`font-bold ${getScoreColor(data.macd_score)}`}>
+                      {data.macd_score?.toFixed(0) || 0}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-gray-500">ADX</p>
+                    <p className={`font-bold ${getScoreColor(data.adx_score)}`}>
+                      {data.adx_score?.toFixed(0) || 0}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-gray-500">Supertrend</p>
+                    <p className={`font-bold ${getScoreColor(data.supertrend_score)}`}>
+                      {data.supertrend_score?.toFixed(0) || 0}
+                    </p>
+                  </div>
+                </div>
               </div>
             );
           })}
@@ -121,3 +101,4 @@ export default function IntervalBreakdown({ intervals, weights }) {
     </div>
   );
 }
+

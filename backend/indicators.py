@@ -1,6 +1,6 @@
 # ============================================
-# backend/indicators.py
-# Updated with 0-100 Scoring System
+# backend/indicators.py - UPDATED
+# Complete with minimal data storage optimization
 # ============================================
 import pandas as pd
 import pandas_ta as pta
@@ -9,13 +9,11 @@ import numpy as np
 def calculate_rsi_score(close_prices):
     """
     Calculate RSI score (0-100)
-    If RSI > 50: Score = RSI
-    If RSI ≤ 50: Score = RSI
     Returns: (score, rsi_value, is_extreme)
     """
     rsi = pta.rsi(close_prices, length=14)
     if rsi is None or rsi.empty:
-        return 0, 50, False
+        return 50, 50, False  # Changed from 0 to 50 for neutral
     
     latest_rsi = rsi.iloc[-1]
     score = latest_rsi  # Direct RSI value as score (0-100)
@@ -189,16 +187,30 @@ def calculate_swing_levels(high, low, lookback=10):
     
     return round(swing_low, 2), round(swing_high, 2)
 
+def calculate_sma(data, period):
+    """
+    Calculate Simple Moving Average (SMA) for a given data series and period.
+    Returns a list of SMA values.
+    """
+    if len(data) < period:
+        return [None] * len(data)  # Not enough data to calculate SMA
+
+    sma_values = pd.Series(data).rolling(window=period).mean().tolist()
+    return [round(x, 2) if x is not None else None for x in sma_values]
+
+# ============================================
+# UPDATED: Minimal Data Storage
+# ============================================
+
 def calculate_all_scores(data, interval):
     """
-    Calculate all indicator scores for a given interval (0-100 scale)
-    Returns dict with scores and analysis
+    Calculate all indicator scores for a given interval
+    Returns MINIMAL dict with only essential data
     """
     close = pd.Series(data['close'])
     high = pd.Series(data['high'])
     low = pd.Series(data['low'])
     volume = data['volume']
-    current_price = data['close'][-1]
     
     # Calculate scores (0-100)
     rsi_score, rsi_value, rsi_extreme = calculate_rsi_score(close)
@@ -218,29 +230,28 @@ def calculate_all_scores(data, interval):
     # Calculate swing levels
     swing_low, swing_high = calculate_swing_levels(high, low)
     
+    # Calculate average total score
+    avg_total_score = (rsi_score + macd_score + adx_score + supertrend_score) / 4
+    
+    # MINIMAL DATA FOR DATABASE - Only what's absolutely needed
     scores = {
         'interval': interval,
-        'rsi_score': rsi_score,
-        'rsi_value': rsi_value,
+        'rsi_score': round(rsi_score, 2),
+        'macd_score': round(macd_score, 2),
+        'adx_score': round(adx_score, 2),
+        'supertrend_score': round(supertrend_score, 2),
+        'avg_total_score': round(avg_total_score, 2),
+        'support': round(support, 2),
+        'resistance': round(resistance, 2),
+        # Additional fields kept for calculations (not stored in DB minimal version)
         'rsi_extreme': int(rsi_extreme),
-        'macd_score': macd_score,
-        'adx_score': adx_score,
-        'supertrend_score': supertrend_score,
-        'current_price': current_price,
-        'support': support,
-        'resistance': resistance,
-        'avg_volume': avg_volume,
-        'volume_ratio': volume_ratio,
         'high_volume': int(high_volume),
-        'atr': current_atr,
-        'avg_atr_20': avg_atr_20,
-        'swing_low': swing_low,
-        'swing_high': swing_high
+        'volume_ratio': round(volume_ratio, 2),
+        'atr': round(current_atr, 4),
+        'avg_atr_20': round(avg_atr_20, 4),
+        'swing_low': round(swing_low, 2),
+        'swing_high': round(swing_high, 2)
     }
-    
-    # Calculate interval total score (average of all indicators)
-    interval_score = (rsi_score + macd_score + adx_score + supertrend_score) / 4
-    scores['total_score'] = round(interval_score, 2)
     
     return scores
 
@@ -315,14 +326,3 @@ def calculate_weighted_indicators(interval_scores, timeframe_weights):
             weighted[key] = round(weighted[key] / total_weight, 2)
     
     return weighted
-
-def calculate_sma(data, period):
-    """
-    Calculate Simple Moving Average (SMA) for a given data series and period.
-    Returns a list of SMA values.
-    """
-    if len(data) < period:
-        return [None] * len(data) # Not enough data to calculate SMA
-
-    sma_values = pd.Series(data).rolling(window=period).mean().tolist()
-    return [round(x, 2) if x is not None else None for x in sma_values]

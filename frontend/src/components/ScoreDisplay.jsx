@@ -20,6 +20,9 @@ export default function ScoreDisplay({ score, settings, symbol }) {
   const masterScore = score.master_score || 0;
   const classification = score.classification || 'NEUTRAL';
   const weightedIndicators = score.weighted_indicators || {};
+  
+  // Get current price from latest candle (not from score)
+  const currentPrice = score.current_price || 0;
 
   const getScoreColor = (classification) => {
     if (classification?.includes('BULLISH')) return 'text-green-500';
@@ -34,19 +37,6 @@ export default function ScoreDisplay({ score, settings, symbol }) {
     if (classification === 'BEARISH') return '📉 BEARISH';
     return '↔️ NEUTRAL';
   };
-  
-  const getProgressWidth = (score) => {
-    return ((score) / 100) * 100;
-  };
-  
-  const getProgressColor = (classification) => {
-    if (classification?.includes('BULLISH')) return 'bg-green-500';
-    if (classification?.includes('BEARISH')) return 'bg-red-500';
-    return 'bg-blue-500';
-  };
-
-  const currentPrice = score.current_price || 0;
-  const formattedPrice = formatPrice(currentPrice, symbol);
 
   return (
     <div className="bg-white rounded-2xl shadow-xl p-8">
@@ -57,29 +47,15 @@ export default function ScoreDisplay({ score, settings, symbol }) {
         </div>
         <p className="text-2xl font-bold mb-6">{getScoreStatus(classification)}</p>
         
-        {/* Progress Bar */}
-        <div className="w-full bg-gray-200 rounded-full h-8 mb-4">
-          <div 
-            className={`h-8 rounded-full transition-all duration-500 flex items-center justify-center text-white font-bold ${getProgressColor(classification)}`}
-            style={{ width: `${getProgressWidth(masterScore)}%` }}
-          >
-            {masterScore.toFixed(1)}
-          </div>
-        </div>
-        
-        {/* Price & Thresholds */}
-        <div className="flex justify-between items-center text-sm text-gray-600">
-          <span>0 (Bearish)</span>
-          <div className="text-center">
-            <p className="text-lg font-bold text-gray-900">
-              {formattedPrice}
-            </p>
-            <p className="text-xs">Current Price</p>
-          </div>
-          <span>100 (Bullish)</span>
+        {/* Current Price */}
+        <div className="mb-4">
+          <p className="text-lg font-bold text-gray-900">
+            ${currentPrice.toFixed(2)}
+          </p>
+          <p className="text-xs text-gray-500">Current Price</p>
         </div>
 
-        {/* Weighted Indicators */}
+        {/* Weighted Indicators - ONLY 4 */}
         <div className="mt-6">
           <p className="text-gray-600 text-md mb-3">Weighted Indicators</p>
           <div className="flex justify-center gap-2 flex-wrap">
@@ -100,3 +76,4 @@ export default function ScoreDisplay({ score, settings, symbol }) {
     </div>
   );
 }
+
